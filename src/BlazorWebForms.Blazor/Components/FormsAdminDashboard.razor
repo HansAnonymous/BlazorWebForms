@@ -1,0 +1,78 @@
+@using BlazorWebForms.Core.Services
+@inject FormsApplicationService FormsService
+
+@if (Dashboard is null)
+{
+    <p>Loading admin dashboard...</p>
+}
+else
+{
+    <div class="bwf-admin">
+        <section class="bwf-panel">
+            <h2>Forms</h2>
+            <div class="bwf-card-grid">
+                @foreach (var form in Dashboard.Forms)
+                {
+                    <article class="bwf-admin-card">
+                        <p class="bwf-kicker">@form.Publication.AccessMode</p>
+                        <h3>@form.Name</h3>
+                        <p>@form.Description</p>
+                        <div class="bwf-meta-stack">
+                            <span>Versions: @form.Versions.Count</span>
+                            <span>Slug: /forms/@form.Publication.Slug</span>
+                        </div>
+                        <div class="bwf-actions">
+                            <a class="bwf-link-button" href="/builder/@form.Id">Builder</a>
+                            <a class="bwf-link-button" href="/forms/@form.Publication.Slug">Published</a>
+                        </div>
+                    </article>
+                }
+            </div>
+        </section>
+
+        <section class="bwf-panel">
+            <div class="bwf-section-toolbar">
+                <h2>Entries</h2>
+                <input class="bwf-input" @bind="Search" @bind:event="oninput" placeholder="Search submitter or indexed values" />
+            </div>
+            <table class="bwf-table">
+                <thead>
+                    <tr>
+                        <th>Submitter</th>
+                        <th>Status</th>
+                        <th>Submitted</th>
+                        <th>Search index</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var entry in FilteredEntries)
+                    {
+                        <tr>
+                            <td><a href="/entries/@entry.Id">@entry.SubmittedBy</a></td>
+                            <td>@entry.Status</td>
+                            <td>@entry.SubmittedUtc.LocalDateTime</td>
+                            <td>@string.Join(", ", entry.SearchIndex.Select(x => $"{x.Key}:{x.Value}"))</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </section>
+    </div>
+}
+
+@code {
+    private DashboardViewModel? Dashboard { get; set; }
+    private string Search { get; set; } = string.Empty;
+
+    private IEnumerable<EntryRecord> FilteredEntries =>
+        Dashboard?.RecentEntries.Where(entry =>
+            string.IsNullOrWhiteSpace(Search) ||
+            entry.SubmittedBy.Contains(Search, StringComparison.OrdinalIgnoreCase) ||
+            entry.SearchIndex.Values.Any(value => value.Contains(Search, StringComparison.OrdinalIgnoreCase)))
+        ?? [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        Dashboard = await FormsService.GetDashboardAsync();
+    }
+}

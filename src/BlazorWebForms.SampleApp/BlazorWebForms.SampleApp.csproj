@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <AddRazorSupportForMvc>true</AddRazorSupportForMvc>
+    <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BlazorWebForms.Core\BlazorWebForms.Core.csproj" />
+    <ProjectReference Include="..\BlazorWebForms.Infrastructure.SqlServer\BlazorWebForms.Infrastructure.SqlServer.csproj" />
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+</Project>

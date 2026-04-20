@@ -1,0 +1,71 @@
+@page "/entries/{EntryId:guid}"
+@inject FormsApplicationService FormsService
+
+<PageTitle>Entry Detail</PageTitle>
+
+@if (ViewModel is null)
+{
+    <p>Loading entry...</p>
+}
+else if (!ViewModel.CanView)
+{
+    <p>Current user cannot view this entry.</p>
+}
+else
+{
+    <article class="entry-shell">
+        <header class="entry-header">
+            <div>
+                <p class="eyebrow">Entry detail</p>
+                <h1>@ViewModel.Form.Name</h1>
+                <p>@ViewModel.Entry.SubmittedBy · @ViewModel.Entry.Status</p>
+            </div>
+            <div class="metric-card">
+                <span>Revisions</span>
+                <strong>@ViewModel.Entry.Revisions.Count</strong>
+            </div>
+        </header>
+
+        <DynamicFormRenderer Definition="ViewModel.Definition" Answers="ReadOnlyAnswers" ReadOnly="true" />
+
+        @if (ViewModel.Entry.ApprovalSteps.Count > 0)
+        {
+            <section class="info-card">
+                <h2>Approval steps</h2>
+                @foreach (var step in ViewModel.Entry.ApprovalSteps.OrderBy(x => x.Order))
+                {
+                    <div class="approval-row">
+                        <div>
+                            <strong>@step.ApproverName</strong>
+                            <div>@step.ApproverEmail</div>
+                        </div>
+                        <div>@step.Status</div>
+                    </div>
+                }
+            </section>
+        }
+    </article>
+}
+
+@code {
+    [Parameter] public Guid EntryId { get; set; }
+
+    private EntryDetailViewModel? ViewModel { get; set; }
+    private Dictionary<string, string?> ReadOnlyAnswers { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        ViewModel = await FormsService.GetEntryDetailAsync(EntryId);
+        ReadOnlyAnswers.Clear();
+
+        if (ViewModel is null)
+        {
+            return;
+        }
+
+        foreach (var pair in ViewModel.Entry.Answers)
+        {
+            ReadOnlyAnswers[pair.Key] = pair.Value;
+        }
+    }
+}

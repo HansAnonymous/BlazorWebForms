@@ -1,0 +1,89 @@
+@using BlazorWebForms.Core.Services
+@inject FormsApplicationService FormsService
+@inject NavigationManager NavigationManager
+
+@if (ViewModel is null)
+{
+    <p>Loading published form...</p>
+}
+else
+{
+    <article class="bwf-panel bwf-public-form">
+        <header class="bwf-hero" style="--accent:@ViewModel.Definition.Branding.AccentColor">
+            <div>
+                <p class="bwf-kicker">Published form</p>
+                <h1>@ViewModel.Form.Name</h1>
+                <p>@ViewModel.Form.Description</p>
+            </div>
+            <div class="bwf-meta">
+                <span>v@ViewModel.Version.VersionNumber</span>
+                <span>@ViewModel.Form.Publication.AccessMode</span>
+            </div>
+        </header>
+
+        <DynamicFormRenderer Definition="ViewModel.Definition" Answers="Answers" AnswersChanged="OnAnswersChanged" />
+
+        <section class="bwf-panel">
+            <h3>Approvers</h3>
+            @for (var index = 0; index < Approvers.Count; index++)
+            {
+                <div class="bwf-grid">
+                    <input class="bwf-input" @bind="Approvers[index].Name" placeholder="Approver name" />
+                    <input class="bwf-input" @bind="Approvers[index].Email" placeholder="Approver email" />
+                </div>
+            }
+            <div class="bwf-actions">
+                <button class="bwf-button" @onclick="AddApprover">Add approver</button>
+                <button class="bwf-button bwf-button-primary" @onclick="SubmitAsync">Submit</button>
+            </div>
+        </section>
+        @if (!string.IsNullOrWhiteSpace(StatusMessage))
+        {
+            <p class="bwf-status">@StatusMessage</p>
+        }
+    </article>
+}
+
+@code {
+    [Parameter, EditorRequired] public required string Slug { get; set; }
+
+    private PublishedFormViewModel? ViewModel { get; set; }
+    private Dictionary<string, string?> Answers { get; } = new(StringComparer.OrdinalIgnoreCase);
+    private List<ApproverInput> Approvers { get; } = [new()];
+    private string StatusMessage { get; set; } = string.Empty;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        ViewModel = await FormsService.GetPublishedFormAsync(Slug);
+    }
+
+    private Task OnAnswersChanged(Dictionary<string, string?> answers)
+    {
+        Answers.Clear();
+        foreach (var pair in answers)
+        {
+            Answers[pair.Key] = pair.Value;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private void AddApprover() => Approvers.Add(new ApproverInput());
+
+    private async Task SubmitAsync()
+    {
+        if (ViewModel is null)
+        {
+            return;
+        }
+
+        var entry = await FormsService.SubmitEntryAsync(ViewModel.Form.Id, new SubmitEntryRequest
+        {
+            Answers = new Dictionary<string, string?>(Answers, StringComparer.OrdinalIgnoreCase),
+            Approvers = Approvers.Where(x => !string.IsNullOrWhiteSpace(x.Email)).ToList()
+        });
+
+        StatusMessage = $"Submitted entry {entry.Id}.";
+        NavigationManager.NavigateTo($"/entries/{entry.Id}");
+    }
+}

@@ -1,0 +1,178 @@
+@inject FormsApplicationService FormsService
+@inject NavigationManager NavigationManager
+
+@if (State is null)
+{
+    <p>Loading builder...</p>
+}
+else
+{
+    <div class="bwf-builder">
+        <div class="bwf-builder-main">
+            <section class="bwf-panel">
+                <h2>Builder</h2>
+                <div class="bwf-grid">
+                    <label>
+                        <span>Name</span>
+                        <input class="bwf-input" @bind="State.Form.Name" />
+                    </label>
+                    <label>
+                        <span>Slug</span>
+                        <input class="bwf-input" @bind="State.Form.Publication.Slug" />
+                    </label>
+                </div>
+                <label>
+                    <span>Description</span>
+                    <textarea class="bwf-textarea" rows="3" @bind="State.Form.Description"></textarea>
+                </label>
+                <label>
+                    <span>Access</span>
+                    <select class="bwf-input" @bind="State.Form.Publication.AccessMode">
+                        <option value="@FormAccessMode.Authenticated">Authenticated</option>
+                        <option value="@FormAccessMode.Public">Public</option>
+                    </select>
+                </label>
+                <div class="bwf-actions">
+                    <button class="bwf-button" @onclick="AddSection">Add section</button>
+                    <button class="bwf-button" @onclick="SaveDraftAsync">Save draft</button>
+                    <button class="bwf-button bwf-button-primary" @onclick="PublishAsync">Publish</button>
+                </div>
+            </section>
+
+            <section class="bwf-panel">
+                <h3>Sections</h3>
+                @foreach (var section in State.Form.DraftDefinition.Sections)
+                {
+                    <article class="bwf-section-card">
+                        <input class="bwf-input" @bind="section.Title" />
+                        <textarea class="bwf-textarea" rows="2" @bind="section.Description"></textarea>
+                        <div class="bwf-actions">
+                            <button class="bwf-button" @onclick="() => AddField(section, FormFieldKind.Text)">Text</button>
+                            <button class="bwf-button" @onclick="() => AddField(section, FormFieldKind.TextArea)">Textarea</button>
+                            <button class="bwf-button" @onclick="() => AddField(section, FormFieldKind.Select)">Select</button>
+                            <button class="bwf-button" @onclick="() => AddField(section, FormFieldKind.Signature)">Signature</button>
+                        </div>
+                        @foreach (var field in section.Fields)
+                        {
+                            <div class="bwf-field-row">
+                                <input class="bwf-input" @bind="field.Label" />
+                                <select class="bwf-input" @bind="field.Kind">
+                                    @foreach (var kind in Enum.GetValues<FormFieldKind>())
+                                    {
+                                        <option value="@kind">@kind</option>
+                                    }
+                                </select>
+                                <label class="bwf-checkbox">
+                                    <input type="checkbox" @bind="field.Required" />
+                                    <span>Required</span>
+                                </label>
+                                <label class="bwf-checkbox">
+                                    <input type="checkbox" @bind="field.Searchable" />
+                                    <span>Search</span>
+                                </label>
+                            </div>
+                        }
+                    </article>
+                }
+            </section>
+        </div>
+
+        <aside class="bwf-builder-preview bwf-panel">
+            <h3>Live preview</h3>
+            <DynamicFormRenderer Definition="State.Form.DraftDefinition" Answers="PreviewAnswers" AnswersChanged="OnPreviewChanged" />
+        </aside>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(StatusMessage))
+    {
+        <p class="bwf-status">@StatusMessage</p>
+    }
+}
+
+@code {
+    [Parameter] public Guid? FormId { get; set; }
+
+    private BuilderState? State { get; set; }
+    private string StatusMessage { get; set; } = string.Empty;
+    private Dictionary<string, string?> PreviewAnswers { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    protected override async Task OnParametersSetAsync()
+    {
+        State = await FormsService.GetBuilderStateAsync(FormId);
+    }
+
+    private void AddSection()
+    {
+        State?.Form.DraftDefinition.Sections.Add(new FormSectionDefinition
+        {
+            Title = "New section",
+            Description = "Describe this section."
+        });
+    }
+
+    private static void AddField(FormSectionDefinition section, FormFieldKind kind)
+    {
+        var field = new FormFieldDefinition
+        {
+            Kind = kind,
+            Label = $"{kind} field",
+            Id = $"{kind.ToString().ToLowerInvariant()}-{Guid.NewGuid():N}"[..16]
+        };
+
+        if (kind is FormFieldKind.Select or FormFieldKind.Radio)
+        {
+            field.Options =
+            [
+                new FormFieldOption { Value = "option-1", Label = "Option 1" },
+                new FormFieldOption { Value = "option-2", Label = "Option 2" }
+            ];
+        }
+
+        section.Fields.Add(field);
+    }
+
+    private async Task SaveDraftAsync()
+    {
+        if (State is null)
+        {
+            return;
+        }
+
+        var form = await FormsService.SaveDraftAsync(new SaveDraftRequest
+        {
+            FormId = State.Form.Id,
+            Name = State.Form.Name,
+            Description = State.Form.Description,
+            Slug = string.IsNullOrWhiteSpace(State.Form.Publication.Slug) ? State.Form.Key : State.Form.Publication.Slug,
+            AccessMode = State.Form.Publication.AccessMode,
+            Definition = State.Form.DraftDefinition,
+            NotificationEmails = State.Form.Notifications.Select(x => x.Email).ToList()
+        });
+
+        StatusMessage = $"Draft saved for {form.Name}.";
+        NavigationManager.NavigateTo($"/builder/{form.Id}");
+    }
+
+    private async Task PublishAsync()
+    {
+        if (State is null)
+        {
+            return;
+        }
+
+        await SaveDraftAsync();
+        var version = await FormsService.PublishAsync(State.Form.Id);
+        StatusMessage = $"Published version {version.VersionNumber}.";
+    }
+
+    private Task OnPreviewChanged(Dictionary<string, string?> answers)
+    {
+        PreviewAnswers.Clear();
+        foreach (var pair in answers)
+        {
+            PreviewAnswers[pair.Key] = pair.Value;
+        }
+
+        return Task.CompletedTask;
+    }
+}

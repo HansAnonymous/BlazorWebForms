@@ -1,0 +1,64 @@
+@page "/"
+@inject FormsApplicationService FormsService
+
+<PageTitle>BlazorWebForms</PageTitle>
+
+@if (Dashboard is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <section class="hero-shell">
+        <div class="hero-copy">
+            <p class="eyebrow">Dynamic forms package for Blazor</p>
+            <h1>Build, publish, submit, revise, approve.</h1>
+            <p class="hero-text">
+                Server-side interactive Blazor package with JSON-backed form versions, searchable entries,
+                manager notifications, and approval trails.
+            </p>
+            <div class="hero-actions">
+                <a class="hero-button hero-button-primary" href="/builder">Open builder</a>
+                <a class="hero-button" href="/admin">View admin dashboard</a>
+            </div>
+        </div>
+        <div class="hero-side">
+            <div class="metric-card">
+                <span>Forms</span>
+                <strong>@Dashboard.Forms.Count</strong>
+            </div>
+            <div class="metric-card">
+                <span>Recent entries</span>
+                <strong>@Dashboard.RecentEntries.Count</strong>
+            </div>
+            <div class="metric-card">
+                <span>Demo route</span>
+                <strong>/forms/expense-approval</strong>
+            </div>
+        </div>
+    </section>
+
+    <section class="info-grid">
+        @foreach (var form in Dashboard.Forms)
+        {
+            <article class="info-card">
+                <p class="eyebrow">@form.Publication.AccessMode</p>
+                <h2>@form.Name</h2>
+                <p>@form.Description</p>
+                <div class="info-actions">
+                    <a href="/builder/@form.Id">Edit draft</a>
+                    <a href="/forms/@form.Publication.Slug">Open published</a>
+                </div>
+            </article>
+        }
+    </section>
+}
+
+@code {
+    private DashboardViewModel? Dashboard { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        Dashboard = await FormsService.GetDashboardAsync();
+    }
+}

@@ -1,0 +1,16 @@
+﻿<Project>
+  <ItemGroup>
+    <StaticWebAssetEndpoint Include="_content/BlazorWebForms.Blazor/blazorwebforms.css">
+      <AssetFile>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\staticwebassets\blazorwebforms.css'))</AssetFile>
+      <Selectors><![CDATA[[]]]></Selectors>
+      <EndpointProperties><![CDATA[[{"Name":"integrity","Value":"sha256-DV\u002BpgUzVl8ttQq6YvT2IPX9DIY8C4r08QUJsSyPZtog="}]]]></EndpointProperties>
+      <ResponseHeaders><![CDATA[[{"Name":"Cache-Control","Value":"no-cache"},{"Name":"Content-Length","Value":"2854"},{"Name":"Content-Type","Value":"text/css"},{"Name":"ETag","Value":"\u0022DV\u002BpgUzVl8ttQq6YvT2IPX9DIY8C4r08QUJsSyPZtog=\u0022"},{"Name":"Last-Modified","Value":"Mon, 20 Apr 2026 05:44:00 GMT"},{"Name":"Vary","Value":"Accept-Encoding"}]]]></ResponseHeaders>
+    </StaticWebAssetEndpoint>
+    <StaticWebAssetEndpoint Include="_content/BlazorWebForms.Blazor/blazorwebforms.xrqaltj710.css">
+      <AssetFile>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\staticwebassets\blazorwebforms.css'))</AssetFile>
+      <Selectors><![CDATA[[]]]></Selectors>
+      <EndpointProperties><![CDATA[[{"Name":"fingerprint","Value":"xrqaltj710"},{"Name":"integrity","Value":"sha256-DV\u002BpgUzVl8ttQq6YvT2IPX9DIY8C4r08QUJsSyPZtog="},{"Name":"label","Value":"_content/BlazorWebForms.Blazor/blazorwebforms.css"}]]]></EndpointProperties>
+      <ResponseHeaders><![CDATA[[{"Name":"Cache-Control","Value":"max-age=31536000, immutable"},{"Name":"Content-Length","Value":"2854"},{"Name":"Content-Type","Value":"text/css"},{"Name":"ETag","Value":"\u0022DV\u002BpgUzVl8ttQq6YvT2IPX9DIY8C4r08QUJsSyPZtog=\u0022"},{"Name":"Last-Modified","Value":"Mon, 20 Apr 2026 05:44:00 GMT"},{"Name":"Vary","Value":"Accept-Encoding"}]]]></ResponseHeaders>
+    </StaticWebAssetEndpoint>
+  </ItemGroup>
+</Project>

@@ -1,0 +1,134 @@
+@using BlazorWebForms.Core.Abstractions
+@inject IConditionEvaluator ConditionEvaluator
+
+<div class="bwf-form">
+    @foreach (var formSection in Definition.Sections.Where(section => ConditionEvaluator.IsVisible(section.VisibilityCondition, Answers)))
+    {
+        <section class="bwf-section">
+            <header class="bwf-section-header">
+                <h3>@formSection.Title</h3>
+                @if (!string.IsNullOrWhiteSpace(formSection.Description))
+                {
+                    <p>@formSection.Description</p>
+                }
+            </header>
+
+            @foreach (var field in formSection.Fields.Where(field => ConditionEvaluator.IsVisible(field.VisibilityCondition, Answers)))
+            {
+                <div class="bwf-field">
+                    <label class="bwf-label" for="@field.Id">@field.Label @(field.Required ? "*" : string.Empty)</label>
+                    @switch (field.Kind)
+                    {
+                        case FormFieldKind.Text:
+                        case FormFieldKind.Number:
+                        case FormFieldKind.Date:
+                            <input id="@field.Id"
+                                   class="bwf-input"
+                                   type="@GetInputType(field.Kind)"
+                                   value="@GetValue(field.Id)"
+                                   placeholder="@field.Placeholder"
+                                   disabled="@ReadOnly"
+                                   @oninput="e => UpdateValue(field.Id, e.Value?.ToString())" />
+                            break;
+                        case FormFieldKind.TextArea:
+                        case FormFieldKind.RichText:
+                            <textarea id="@field.Id"
+                                      class="bwf-textarea"
+                                      rows="4"
+                                      placeholder="@field.Placeholder"
+                                      disabled="@ReadOnly"
+                                      @oninput="e => UpdateValue(field.Id, e.Value?.ToString())">@GetValue(field.Id)</textarea>
+                            break;
+                        case FormFieldKind.Checkbox:
+                            <input id="@field.Id"
+                                   type="checkbox"
+                                   checked="@string.Equals(GetValue(field.Id), "true", StringComparison.OrdinalIgnoreCase)"
+                                   disabled="@ReadOnly"
+                                   @onchange="e => UpdateValue(field.Id, e.Value?.ToString())" />
+                            break;
+                        case FormFieldKind.Select:
+                            <select id="@field.Id"
+                                    class="bwf-input"
+                                    disabled="@ReadOnly"
+                                    value="@GetValue(field.Id)"
+                                    @onchange="e => UpdateValue(field.Id, e.Value?.ToString())">
+                                <option value="">Select...</option>
+                                @foreach (var option in field.Options)
+                                {
+                                    <option value="@option.Value">@option.Label</option>
+                                }
+                            </select>
+                            break;
+                        case FormFieldKind.Radio:
+                            <div class="bwf-radio-group">
+                                @foreach (var option in field.Options)
+                                {
+                                    <label class="bwf-radio">
+                                        <input type="radio"
+                                               name="@field.Id"
+                                               value="@option.Value"
+                                               checked="@string.Equals(GetValue(field.Id), option.Value, StringComparison.OrdinalIgnoreCase)"
+                                               disabled="@ReadOnly"
+                                               @onchange="e => UpdateValue(field.Id, e.Value?.ToString())" />
+                                        <span>@option.Label</span>
+                                    </label>
+                                }
+                            </div>
+                            break;
+                        case FormFieldKind.File:
+                            <InputFile OnChange="e => OnFileChanged(field.Id, e)" disabled="@ReadOnly" />
+                            @if (!string.IsNullOrWhiteSpace(GetValue(field.Id)))
+                            {
+                                <div class="bwf-help">Uploaded: @GetValue(field.Id)</div>
+                            }
+                            break;
+                        case FormFieldKind.Signature:
+                            <input id="@field.Id"
+                                   class="bwf-input"
+                                   type="text"
+                                   value="@GetValue(field.Id)"
+                                   placeholder="Type signer name"
+                                   disabled="@ReadOnly"
+                                   @oninput="e => UpdateValue(field.Id, e.Value?.ToString())" />
+                            break;
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(field.HelpText))
+                    {
+                        <div class="bwf-help">@field.HelpText</div>
+                    }
+                </div>
+            }
+        </section>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public required FormDefinition Definition { get; set; }
+    [Parameter, EditorRequired] public required Dictionary<string, string?> Answers { get; set; }
+    [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public EventCallback<Dictionary<string, string?>> AnswersChanged { get; set; }
+
+    private string? GetValue(string fieldId) =>
+        Answers.TryGetValue(fieldId, out var value) ? value : null;
+
+    private static string GetInputType(FormFieldKind kind) => kind switch
+    {
+        FormFieldKind.Number => "number",
+        FormFieldKind.Date => "date",
+        _ => "text"
+    };
+
+    private async Task UpdateValue(string fieldId, string? value)
+    {
+        Answers[fieldId] = value;
+        await AnswersChanged.InvokeAsync(Answers);
+    }
+
+    private async Task OnFileChanged(string fieldId, InputFileChangeEventArgs args)
+    {
+        var file = args.File;
+        Answers[fieldId] = file?.Name;
+        await AnswersChanged.InvokeAsync(Answers);
+    }
+}

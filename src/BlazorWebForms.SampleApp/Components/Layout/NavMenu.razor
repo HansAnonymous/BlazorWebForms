@@ -1,0 +1,24 @@
+<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="">BlazorWebForms</a>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="nav flex-column">
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">Overview</NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="admin">Admin</NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="builder">Builder</NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="forms/expense-approval">Published demo</NavLink>
+        </div>
+    </nav>
+</div>

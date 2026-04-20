@@ -1,0 +1,9 @@
+@page "/forms/{Slug}"
+
+<PageTitle>Published Form</PageTitle>
+
+<PublishedFormView Slug="Slug" />
+
+@code {
+    [Parameter, EditorRequired] public required string Slug { get; set; }
+}
