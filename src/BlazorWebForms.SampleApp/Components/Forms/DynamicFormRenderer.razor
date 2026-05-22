@@ -17,6 +17,10 @@
             {
                 <div class="bwf-field">
                     <label class="bwf-label" for="@field.Id">@field.Label @(field.Required ? "*" : string.Empty)</label>
+                    @if (!string.IsNullOrWhiteSpace(field.HelpText))
+                    {
+                        <div class="bwf-help">@field.HelpText</div>
+                    }
                     @switch (field.Kind)
                     {
                         case FormFieldKind.Text:

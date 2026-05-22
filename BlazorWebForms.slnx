@@ -1,4 +1,7 @@
 <Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".gitignore" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/BlazorWebForms.Blazor/BlazorWebForms.Blazor.csproj" />
     <Project Path="src/BlazorWebForms.Core/BlazorWebForms.Core.csproj" />

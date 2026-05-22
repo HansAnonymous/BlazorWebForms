@@ -1,0 +1,105 @@
+using System;
+using System.Collections.Generic;
+
+namespace BlazorWebForms.Infrastructure.SqlServer;
+
+public class FormEntity
+{
+    public Guid Id { get; set; }
+    public string Key { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string Description { get; set; } = string.Empty;
+    public Guid OwnerUserId { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public string? DraftDefinitionJson { get; set; }
+    public string PublicationSlug { get; set; } = string.Empty;
+    public string PublicationDomain { get; set; } = string.Empty;
+    public int PublicationAccessMode { get; set; }
+    public bool PublicationSendSubmissionCopyToSubmitter { get; set; }
+
+    public ICollection<FormVersionEntity> Versions { get; set; } = new List<FormVersionEntity>();
+    public ICollection<FormPermissionEntity> Permissions { get; set; } = new List<FormPermissionEntity>();
+    public ICollection<FormNotificationEntity> Notifications { get; set; } = new List<FormNotificationEntity>();
+}
+
+public class FormVersionEntity
+{
+    public Guid Id { get; set; }
+    public Guid FormId { get; set; }
+    public FormEntity? Form { get; set; }
+    public int VersionNumber { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public string DefinitionJson { get; set; } = string.Empty;
+}
+
+public class FormPermissionEntity
+{
+    public Guid Id { get; set; }
+    public Guid FormId { get; set; }
+    public FormEntity? Form { get; set; }
+    public Guid UserId { get; set; }
+    public string DisplayName { get; set; } = string.Empty;
+    public int Role { get; set; }
+}
+
+public class FormNotificationEntity
+{
+    public Guid Id { get; set; }
+    public Guid FormId { get; set; }
+    public FormEntity? Form { get; set; }
+    public string Email { get; set; } = string.Empty;
+    public bool OnSubmission { get; set; } = true;
+    public bool OnApproval { get; set; } = true;
+}
+
+public class EntryEntity
+{
+    public Guid Id { get; set; }
+    public Guid FormId { get; set; }
+    public FormEntity? Form { get; set; }
+    public Guid FormVersionId { get; set; }
+    public string SubmittedBy { get; set; } = string.Empty;
+    public string SubmittedByEmail { get; set; } = string.Empty;
+    public DateTimeOffset SubmittedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public int Status { get; set; }
+    public Dictionary<string, string?> Answers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> SearchIndex { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    public ICollection<EntryRevisionEntity> Revisions { get; set; } = new List<EntryRevisionEntity>();
+    public ICollection<ApprovalStepEntity> ApprovalSteps { get; set; } = new List<ApprovalStepEntity>();
+    public ICollection<EntrySearchIndexEntity> SearchIndexEntries { get; set; } = new List<EntrySearchIndexEntity>();
+}
+
+public class EntryRevisionEntity
+{
+    public Guid Id { get; set; }
+    public Guid EntryId { get; set; }
+    public EntryEntity? Entry { get; set; }
+    public int RevisionNumber { get; set; }
+    public string EditedBy { get; set; } = string.Empty;
+    public DateTimeOffset EditedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public Dictionary<string, string?> Answers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+public class ApprovalStepEntity
+{
+    public Guid Id { get; set; }
+    public Guid EntryId { get; set; }
+    public EntryEntity? Entry { get; set; }
+    public int Order { get; set; }
+    public string ApproverName { get; set; } = string.Empty;
+    public string ApproverEmail { get; set; } = string.Empty;
+    public int Status { get; set; }
+    public string? Signature { get; set; }
+    public DateTimeOffset? CompletedUtc { get; set; }
+}
+
+public class EntrySearchIndexEntity
+{
+    public Guid Id { get; set; }
+    public Guid EntryId { get; set; }
+    public EntryEntity? Entry { get; set; }
+    public string Key { get; set; } = string.Empty;
+    public string Value { get; set; } = string.Empty;
+}

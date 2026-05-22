@@ -1,4 +1,5 @@
 using BlazorWebForms.Core.Abstractions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -14,6 +15,10 @@ public static class ServiceCollectionExtensions
         configure?.Invoke(options);
 
         services.AddSingleton(options);
+        // register EF Core DbContext and EF-backed repository (scoped)
+        services.AddDbContext<BlazorWebFormsDbContext>(builder => builder.UseSqlServer(options.ConnectionString));
+        services.AddScoped<IFormsRepository, EfFormsRepository>();
+        // fallback in-memory implementations (kept for reference)
         services.TryAddSingleton<IFormsRepository, InMemorySqlFormsRepository>();
         services.TryAddSingleton<IFileStorage, LocalFileStorage>();
         services.TryAddSingleton<IPdfExporter, TextPdfExporter>();

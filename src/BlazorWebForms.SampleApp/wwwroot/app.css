@@ -1,17 +1,44 @@
-html, body {
+:root {
+    --gforms-bg: #eef3fb;
+    --gforms-surface: #ffffff;
+    --gforms-surface-soft: #f8fafd;
+    --gforms-border: #dbe4f1;
+    --gforms-text: #1f2c3d;
+    --gforms-muted: #5f6f86;
+    --gforms-link: #0b57d0;
+    --gforms-primary: #1a73e8;
+    --gforms-primary-strong: #0b57d0;
+    --gforms-radius: 1rem;
+    --gforms-shadow: 0 18px 40px rgba(12, 38, 70, 0.08);
+}
+
+html,
+body {
     background:
-        radial-gradient(circle at top left, rgba(232, 245, 238, 0.95), transparent 35%),
-        linear-gradient(180deg, #f9fbf7 0%, #eef3ec 100%);
-    color: #173131;
-    font-family: Georgia, "Times New Roman", serif;
+        radial-gradient(circle at 10% 0%, rgba(26, 115, 232, 0.11), transparent 42%),
+        radial-gradient(circle at 92% 22%, rgba(66, 133, 244, 0.1), transparent 34%),
+        var(--gforms-bg);
+    color: var(--gforms-text);
+    font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+    min-height: 100%;
+}
+
+h1,
+h2,
+h3,
+h4 {
+    color: #132033;
+    font-family: "Literata", Georgia, serif;
 }
 
 a {
-    color: #0f766e;
+    color: var(--gforms-link);
 }
 
 .content {
-    padding-top: 1.25rem;
+    margin: 0 auto;
+    max-width: 1080px;
+    padding: 1.25rem;
 }
 
 h1:focus {
@@ -21,24 +48,31 @@ h1:focus {
 .hero-shell,
 .entry-shell {
     display: grid;
-    gap: 1.5rem;
+    gap: 1.25rem;
 }
 
 .hero-shell {
     align-items: start;
-    grid-template-columns: minmax(0, 1.7fr) minmax(240px, 0.8fr);
-    margin-bottom: 1.5rem;
+    grid-template-columns: minmax(0, 1.7fr) minmax(230px, 0.8fr);
 }
 
 .hero-copy,
 .hero-side,
 .info-card,
-.metric-card {
-    background: rgba(255, 255, 255, 0.82);
-    border: 1px solid rgba(20, 70, 70, 0.08);
-    border-radius: 1.25rem;
-    box-shadow: 0 22px 60px rgba(13, 37, 37, 0.08);
-    padding: 1.4rem;
+.metric-card,
+.bwf-panel,
+.bwf-section,
+.bwf-admin-card,
+.bwf-section-card {
+    background: var(--gforms-surface);
+    border: 1px solid var(--gforms-border);
+    border-radius: var(--gforms-radius);
+    box-shadow: var(--gforms-shadow);
+}
+
+.hero-copy {
+    border-top: 12px solid var(--gforms-primary);
+    padding: 1.45rem;
 }
 
 .hero-side,
@@ -47,75 +81,104 @@ h1:focus {
     gap: 1rem;
 }
 
-.info-grid {
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+.hero-side,
+.metric-card {
+    background: var(--gforms-surface-soft);
 }
 
-.eyebrow {
-    color: #49716d;
-    font-size: 0.78rem;
+.metric-card {
+    padding: 1rem;
+}
+
+.metric-card strong {
+    display: block;
+    font-size: 1.5rem;
+    margin-top: 0.2rem;
+}
+
+.info-grid,
+.bwf-card-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.info-card {
+    padding: 1.25rem;
+}
+
+.eyebrow,
+.bwf-kicker {
+    color: var(--gforms-muted);
+    font-size: 0.75rem;
     letter-spacing: 0.11em;
+    margin-bottom: 0.35rem;
     text-transform: uppercase;
 }
 
 .hero-text {
-    font-size: 1.1rem;
+    color: #354861;
+    font-size: 1.04rem;
     max-width: 60ch;
 }
 
 .hero-actions,
-.info-actions {
+.info-actions,
+.bwf-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 0.85rem;
+    gap: 0.7rem;
     margin-top: 1rem;
 }
 
-.hero-button {
-    border: 1px solid #b9d4d1;
+.hero-button,
+.bwf-button,
+.bwf-link-button {
+    border: 1px solid transparent;
     border-radius: 999px;
-    color: #164646;
+    cursor: pointer;
     display: inline-flex;
-    padding: 0.8rem 1.15rem;
+    font-size: 0.93rem;
+    font-weight: 600;
+    padding: 0.65rem 1rem;
     text-decoration: none;
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 
-.hero-button-primary {
-    background: #0f766e;
-    border-color: #0f766e;
-    color: white;
+.hero-button,
+.bwf-button,
+.bwf-link-button {
+    background: #e8f0fe;
+    border-color: #c8dafb;
+    color: #16457a;
 }
 
-.entry-header,
-.approval-row {
-    display: flex;
-    gap: 1rem;
-    justify-content: space-between;
+.hero-button-primary,
+.bwf-button-primary {
+    background: var(--gforms-primary);
+    border-color: var(--gforms-primary);
+    color: #fff;
 }
 
-@media (max-width: 900px) {
-    .hero-shell {
-        grid-template-columns: 1fr;
-    }
+.hero-button:hover,
+.bwf-button:hover,
+.bwf-link-button:hover {
+    background: #d8e7ff;
+}
 
-    .entry-header,
-    .approval-row {
-        flex-direction: column;
-    }
+.hero-button-primary:hover,
+.bwf-button-primary:hover {
+    background: var(--gforms-primary-strong);
 }
 
 .bwf-panel {
-    background: #ffffff;
-    border: 1px solid #d6e4e4;
-    border-radius: 1rem;
-    box-shadow: 0 20px 50px rgba(15, 23, 42, 0.06);
     padding: 1.25rem;
 }
 
 .bwf-builder,
 .bwf-admin {
     display: grid;
-    gap: 1.25rem;
+    gap: 1.1rem;
 }
 
 .bwf-builder {
@@ -123,129 +186,100 @@ h1:focus {
 }
 
 .bwf-builder-main,
-.bwf-card-grid {
+.bwf-meta,
+.bwf-meta-stack {
     display: grid;
-    gap: 1rem;
-}
-
-.bwf-card-grid {
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 0.75rem;
 }
 
 .bwf-grid {
     display: grid;
     gap: 0.75rem;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
 }
 
 .bwf-input,
 .bwf-textarea {
+    background: #fff;
+    border: 1px solid #cfd9e8;
+    border-radius: 0.65rem;
+    color: #203147;
+    padding: 0.68rem 0.85rem;
     width: 100%;
-    border: 1px solid #b8c8c8;
-    border-radius: 0.75rem;
-    padding: 0.75rem 0.9rem;
-    background: #fcfdfc;
 }
 
-.bwf-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    margin-top: 1rem;
-}
-
-.bwf-button,
-.bwf-link-button {
-    border: 0;
-    border-radius: 999px;
-    background: #d7eeee;
-    color: #124040;
-    cursor: pointer;
-    display: inline-flex;
-    font-weight: 600;
-    padding: 0.7rem 1rem;
-    text-decoration: none;
-}
-
-.bwf-button-primary {
-    background: #115e59;
-    color: #f4fffe;
-}
-
-.bwf-section-card,
-.bwf-admin-card,
-.bwf-section {
-    border: 1px solid #dce8e7;
-    border-radius: 1rem;
-    padding: 1rem;
-}
-
-.bwf-section-header p,
-.bwf-help,
-.bwf-meta,
-.bwf-kicker,
-.bwf-meta-stack {
-    color: #486565;
-}
-
-.bwf-kicker {
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    font-size: 0.75rem;
+.bwf-input:focus,
+.bwf-textarea:focus {
+    border-color: var(--gforms-primary);
+    box-shadow: 0 0 0 3px rgba(26, 115, 232, 0.16);
+    outline: none;
 }
 
 .bwf-field,
 .bwf-field-row {
     display: grid;
-    gap: 0.5rem;
+    gap: 0.45rem;
     margin-top: 1rem;
 }
 
 .bwf-field-row {
-    grid-template-columns: minmax(0, 2fr) minmax(160px, 1fr) auto auto;
     align-items: center;
+    grid-template-columns: minmax(0, 2fr) minmax(170px, 1fr) auto auto;
 }
 
 .bwf-checkbox,
 .bwf-radio {
     align-items: center;
     display: inline-flex;
-    gap: 0.5rem;
+    gap: 0.45rem;
 }
 
 .bwf-radio-group {
     display: flex;
     flex-wrap: wrap;
+    gap: 0.9rem;
+}
+
+.bwf-section,
+.bwf-admin-card,
+.bwf-section-card {
+    padding: 1rem;
+}
+
+.bwf-form {
+    display: grid;
     gap: 1rem;
+}
+
+.bwf-section {
+    border-top: 6px solid var(--gforms-primary);
+}
+
+.bwf-help,
+.bwf-meta,
+.bwf-meta-stack,
+.bwf-section-header p {
+    color: var(--gforms-muted);
 }
 
 .bwf-hero {
-    align-items: center;
-    background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 28%, white), #fff8ed 70%);
-    border-radius: 1rem;
+    align-items: start;
+    background: linear-gradient(135deg, color-mix(in srgb, var(--accent) 24%, white), #edf4ff 70%);
+    border-radius: 0.9rem;
     display: flex;
     justify-content: space-between;
     margin-bottom: 1rem;
-    padding: 1.25rem;
+    padding: 1.2rem;
 }
 
-.bwf-meta-stack,
-.bwf-meta {
-    display: grid;
-    gap: 0.25rem;
-}
-
-.bwf-status {
-    color: #0f766e;
-    font-weight: 600;
-}
-
-.bwf-section-toolbar {
+.bwf-section-toolbar,
+.entry-header,
+.approval-row {
+    align-items: center;
     display: flex;
     flex-wrap: wrap;
-    gap: 1rem;
+    gap: 0.8rem;
     justify-content: space-between;
-    margin-bottom: 1rem;
 }
 
 .bwf-table {
@@ -255,20 +289,30 @@ h1:focus {
 
 .bwf-table th,
 .bwf-table td {
-    border-bottom: 1px solid #d7e4e4;
-    padding: 0.85rem;
+    border-bottom: 1px solid var(--gforms-border);
+    padding: 0.78rem;
     text-align: left;
 }
 
+.bwf-status {
+    color: var(--gforms-primary-strong);
+    font-weight: 700;
+}
+
 @media (max-width: 900px) {
+    .hero-shell,
     .bwf-builder {
         grid-template-columns: 1fr;
     }
 
-    .bwf-field-row,
+    .entry-header,
+    .approval-row,
     .bwf-hero {
-        grid-template-columns: 1fr;
         flex-direction: column;
-        gap: 1rem;
+        align-items: start;
+    }
+
+    .bwf-field-row {
+        grid-template-columns: 1fr;
     }
 }

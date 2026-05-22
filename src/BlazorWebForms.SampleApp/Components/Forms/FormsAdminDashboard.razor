@@ -8,6 +8,7 @@ else
 {
     <div class="bwf-admin">
         <section class="bwf-panel">
+            <p class="bwf-kicker">Admin console</p>
             <h2>Forms</h2>
             <div class="bwf-card-grid">
                 @foreach (var form in Dashboard.Forms)
@@ -31,7 +32,10 @@ else
 
         <section class="bwf-panel">
             <div class="bwf-section-toolbar">
-                <h2>Entries</h2>
+                <div>
+                    <p class="bwf-kicker">Response tracking</p>
+                    <h2>Entries</h2>
+                </div>
                 <input class="bwf-input" @bind="Search" @bind:event="oninput" placeholder="Search submitter or indexed values" />
             </div>
             <table class="bwf-table">

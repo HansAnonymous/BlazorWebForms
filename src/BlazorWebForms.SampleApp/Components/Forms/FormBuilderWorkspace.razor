@@ -10,7 +10,9 @@ else
     <div class="bwf-builder">
         <div class="bwf-builder-main">
             <section class="bwf-panel">
-                <h2>Builder</h2>
+                <p class="bwf-kicker">Form editor</p>
+                <h2>@State.Form.Name</h2>
+                <p class="bwf-help">Edit metadata, compose sections, and publish a version snapshot.</p>
                 <div class="bwf-grid">
                     <label>
                         <span>Name</span>
@@ -33,7 +35,7 @@ else
                     </select>
                 </label>
                 <div class="bwf-actions">
-                    <button class="bwf-button" @onclick="AddSection">Add section</button>
+                    <button class="bwf-button" @onclick="AddSection">New section</button>
                     <button class="bwf-button" @onclick="SaveDraftAsync">Save draft</button>
                     <button class="bwf-button bwf-button-primary" @onclick="PublishAsync">Publish</button>
                 </div>
@@ -44,6 +46,7 @@ else
                 @foreach (var section in State.Form.DraftDefinition.Sections)
                 {
                     <article class="bwf-section-card">
+                        <p class="bwf-kicker">Section</p>
                         <input class="bwf-input" @bind="section.Title" />
                         <textarea class="bwf-textarea" rows="2" @bind="section.Description"></textarea>
                         <div class="bwf-actions">
