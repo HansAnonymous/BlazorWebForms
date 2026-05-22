@@ -57,8 +57,20 @@ public sealed class EntryRecord
     public EntryStatus Status { get; set; } = EntryStatus.Submitted;
     public Dictionary<string, string?> Answers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> SearchIndex { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public List<EntryFileRecord> Files { get; set; } = [];
     public List<EntryRevisionRecord> Revisions { get; set; } = [];
     public List<ApprovalStepRecord> ApprovalSteps { get; set; } = [];
+}
+
+public sealed class EntryFileRecord
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string FieldId { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string ContentType { get; set; } = "application/octet-stream";
+    public long Length { get; set; }
+    public string RelativePath { get; set; } = string.Empty;
+    public DateTimeOffset UploadedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class EntryRevisionRecord

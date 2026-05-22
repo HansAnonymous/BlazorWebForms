@@ -38,6 +38,7 @@ The infrastructure project includes a SQL Server schema creation script, but the
 ## Roadmap (What’s Next)
 
 ### Milestone 1: Production-Grade Persistence (SQL Server / Azure SQL)
+- Detailed execution checklist: `milestones/Milestone 1.md`
 - Implement EF Core model + migrations for:
   - Forms, form versions, publications
   - Entries, entry revisions
@@ -51,6 +52,7 @@ The infrastructure project includes a SQL Server schema creation script, but the
 - Add a “historical render” path: entry detail renders using the exact form version used at submission.
 
 ### Milestone 2: Real Auth + Permissions
+- Detailed execution checklist: `milestones/Milestone 2.md`
 - Integrate with ASP.NET Core authentication/authorization (host-provided identity).
 - Define and enforce authorization rules for:
   - Form owner/manager: builder, publish, admin
@@ -59,6 +61,7 @@ The infrastructure project includes a SQL Server schema creation script, but the
 - Implement invitation flows (email-based) as an optional module.
 
 ### Milestone 3: Builder UX + Schema Completeness
+- Detailed execution checklist: `milestones/Milestone 3.md`
 - Expand builder features:
   - Field editing (placeholder/help/regex/options), reorder, delete
   - Conditional visibility editor (rule builder instead of raw `field=value`)
@@ -68,6 +71,7 @@ The infrastructure project includes a SQL Server schema creation script, but the
 - Formalize schema versioning for `FormDefinition` JSON (forward-compatible migrations).
 
 ### Milestone 4: Submissions, Edits, and Workflow
+- Detailed execution checklist: `milestones/Milestone 4.md`
 - Make “edit after submit” policy configurable per form (immutable revisions vs. hard overwrite mode).
 - Add draft submissions (save progress without submission).
 - Add richer approval workflow:
@@ -76,11 +80,13 @@ The infrastructure project includes a SQL Server schema creation script, but the
   - Rejection and resubmission flow
 
 ### Milestone 5: Files, PDF, Notifications (Real Implementations)
+- Detailed execution checklist: `milestones/Milestone 5.md`
 - File upload: store bytes + metadata; support multiple files; per-field constraints.
 - PDF export: real PDF generation (replace stub text exporter).
 - Email notifications: real email provider integration (replace in-memory notifier).
 
 ### Milestone 6: Accessibility, i18n, and Polish
+- Detailed execution checklist: `milestones/Milestone 6.md`
 - WCAG 2.1 AA review:
   - Labels/ARIA, keyboard navigation, focus management, error summaries
   - Color contrast and responsive behaviors
@@ -114,4 +120,3 @@ Quick verification tests (offline):
 dotnet run --project tests/BlazorWebForms.Core.Tests/BlazorWebForms.Core.Tests.csproj -m:1 /p:BuildInParallel=false /p:RestoreDisableParallel=true
 dotnet run --project tests/BlazorWebForms.Infrastructure.SqlServer.Tests/BlazorWebForms.Infrastructure.SqlServer.Tests.csproj -m:1 /p:BuildInParallel=false /p:RestoreDisableParallel=true
 ```
-

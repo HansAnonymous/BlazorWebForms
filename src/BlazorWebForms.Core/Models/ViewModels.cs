@@ -26,6 +26,7 @@ public sealed class EntryDetailViewModel
     public required EntryRecord Entry { get; init; }
     public required FormDefinition Definition { get; init; }
     public required bool CanView { get; init; }
+    public string? HistoricalRenderWarning { get; init; }
 }
 
 public sealed class SaveDraftRequest
@@ -43,6 +44,19 @@ public sealed class SubmitEntryRequest
 {
     public Dictionary<string, string?> Answers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<ApproverInput> Approvers { get; set; } = [];
+    public List<SubmittedFileInput> Files { get; set; } = [];
+}
+
+public sealed class SubmittedFileInput
+{
+    public string FieldId { get; set; } = string.Empty;
+    public StoredFile File { get; set; } = new();
+}
+
+public sealed class FileUploadInput
+{
+    public string FieldId { get; set; } = string.Empty;
+    public FileUploadRequest Request { get; set; } = new();
 }
 
 public sealed class ApproverInput

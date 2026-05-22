@@ -26,6 +26,14 @@ else
             </div>
         </header>
 
+        @if (!string.IsNullOrWhiteSpace(ViewModel.HistoricalRenderWarning))
+        {
+            <section class="info-card">
+                <strong>Historical render warning</strong>
+                <p>@ViewModel.HistoricalRenderWarning</p>
+            </section>
+        }
+
         <DynamicFormRenderer Definition="ViewModel.Definition" Answers="ReadOnlyAnswers" ReadOnly="true" />
 
         @if (ViewModel.Entry.ApprovalSteps.Count > 0)

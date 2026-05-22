@@ -131,6 +131,50 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                     b.ToTable("EntryRevisions", (string)null);
                 });
 
+            modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.EntryFileMetadataEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<Guid>("EntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("FieldId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(260)
+                        .HasColumnType("nvarchar(260)");
+
+                    b.Property<long>("Length")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("RelativePath")
+                        .IsRequired()
+                        .HasMaxLength(512)
+                        .HasColumnType("nvarchar(512)");
+
+                    b.Property<DateTimeOffset>("UploadedUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("EntryId");
+
+                    b.HasIndex("EntryId", "FieldId");
+
+                    b.ToTable("EntryFiles", (string)null);
+                });
+
             modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.EntrySearchIndexEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -296,6 +340,17 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                     b.Navigation("Entry");
                 });
 
+            modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.EntryFileMetadataEntity", b =>
+                {
+                    b.HasOne("BlazorWebForms.Infrastructure.SqlServer.EntryEntity", "Entry")
+                        .WithMany("Files")
+                        .HasForeignKey("EntryId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Entry");
+                });
+
             modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.EntryEntity", b =>
                 {
                     b.HasOne("BlazorWebForms.Infrastructure.SqlServer.FormEntity", "Form")
@@ -365,6 +420,8 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
             modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.EntryEntity", b =>
                 {
                     b.Navigation("ApprovalSteps");
+
+                    b.Navigation("Files");
 
                     b.Navigation("Revisions");
 

@@ -69,6 +69,7 @@ public class EntryEntity
     public ICollection<EntryRevisionEntity> Revisions { get; set; } = new List<EntryRevisionEntity>();
     public ICollection<ApprovalStepEntity> ApprovalSteps { get; set; } = new List<ApprovalStepEntity>();
     public ICollection<EntrySearchIndexEntity> SearchIndexEntries { get; set; } = new List<EntrySearchIndexEntity>();
+    public ICollection<EntryFileMetadataEntity> Files { get; set; } = new List<EntryFileMetadataEntity>();
 }
 
 public class EntryRevisionEntity
@@ -102,4 +103,17 @@ public class EntrySearchIndexEntity
     public EntryEntity? Entry { get; set; }
     public string Key { get; set; } = string.Empty;
     public string Value { get; set; } = string.Empty;
+}
+
+public class EntryFileMetadataEntity
+{
+    public Guid Id { get; set; }
+    public Guid EntryId { get; set; }
+    public EntryEntity? Entry { get; set; }
+    public string FieldId { get; set; } = string.Empty;
+    public string FileName { get; set; } = string.Empty;
+    public string ContentType { get; set; } = "application/octet-stream";
+    public long Length { get; set; }
+    public string RelativePath { get; set; } = string.Empty;
+    public DateTimeOffset UploadedUtc { get; set; } = DateTimeOffset.UtcNow;
 }

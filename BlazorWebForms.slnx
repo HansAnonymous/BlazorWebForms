@@ -1,6 +1,12 @@
 <Solution>
   <Folder Name="/Solution Items/">
     <File Path=".gitignore" />
+    <File Path="milestones/Milestone 1.md" />
+    <File Path="milestones/Milestone 2.md" />
+    <File Path="milestones/Milestone 3.md" />
+    <File Path="milestones/Milestone 4.md" />
+    <File Path="milestones/Milestone 5.md" />
+    <File Path="milestones/Milestone 6.md" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/BlazorWebForms.Blazor/BlazorWebForms.Blazor.csproj" />

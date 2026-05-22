@@ -8,7 +8,8 @@ public sealed class FormsApplicationService(
     IFormDefinitionSerializer serializer,
     IPermissionEvaluator permissionEvaluator,
     ICurrentUserContext currentUserContext,
-    IEmailNotifier emailNotifier)
+    IEmailNotifier emailNotifier,
+    IFileStorage fileStorage)
 {
     public async Task SeedAsync(CancellationToken cancellationToken = default) =>
         await repository.SeedAsync(cancellationToken);
@@ -155,6 +156,21 @@ public sealed class FormsApplicationService(
             }
         }
 
+        foreach (var submittedFile in request.Files.Where(f => !string.IsNullOrWhiteSpace(f.FieldId)))
+        {
+            entry.Files.Add(new EntryFileRecord
+            {
+                FieldId = submittedFile.FieldId,
+                FileName = submittedFile.File.FileName,
+                ContentType = submittedFile.File.ContentType,
+                Length = submittedFile.File.Length,
+                RelativePath = submittedFile.File.RelativePath,
+                UploadedUtc = DateTimeOffset.UtcNow
+            });
+
+            entry.Answers[submittedFile.FieldId] = submittedFile.File.FileName;
+        }
+
         entry.Revisions.Add(new EntryRevisionRecord
         {
             RevisionNumber = 1,
@@ -233,10 +249,26 @@ public sealed class FormsApplicationService(
             return null;
         }
 
+        FormDefinition definition;
+        string? warning = null;
+
         var version = form.Versions.FirstOrDefault(candidate => candidate.Id == entry.FormVersionId);
         if (version is null)
         {
-            return null;
+            definition = form.DraftDefinition;
+            warning = "Historical form version was not found. Showing current draft definition for diagnostics.";
+        }
+        else
+        {
+            try
+            {
+                definition = serializer.Deserialize(version.DefinitionJson);
+            }
+            catch
+            {
+                definition = form.DraftDefinition;
+                warning = "Historical form version is unavailable or invalid. Showing current draft definition for diagnostics.";
+            }
         }
 
         var user = currentUserContext.GetCurrentUser();
@@ -244,9 +276,20 @@ public sealed class FormsApplicationService(
         {
             Form = form,
             Entry = entry,
-            Definition = serializer.Deserialize(version.DefinitionJson),
-            CanView = permissionEvaluator.CanViewEntry(form, entry, user)
+            Definition = definition,
+            CanView = permissionEvaluator.CanViewEntry(form, entry, user),
+            HistoricalRenderWarning = warning
         };
+    }
+
+    public async Task<StoredFile> StoreFileAsync(FileUploadRequest request, CancellationToken cancellationToken = default)
+    {
+        return await fileStorage.SaveAsync(request, cancellationToken);
+    }
+
+    public async Task<StoredFile> StoreFileAsync(FileUploadInput input, CancellationToken cancellationToken = default)
+    {
+        return await fileStorage.SaveAsync(input.Request, cancellationToken);
     }
 
     private static FormAggregate CreateEmptyForm(UserProfile user)

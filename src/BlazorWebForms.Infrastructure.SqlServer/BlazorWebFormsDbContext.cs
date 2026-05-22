@@ -14,6 +14,7 @@ public sealed class BlazorWebFormsDbContext : DbContext
     public DbSet<FormVersionEntity> FormVersions { get; set; } = null!;
     public DbSet<EntryEntity> Entries { get; set; } = null!;
     public DbSet<EntrySearchIndexEntity> EntrySearchIndex { get; set; } = null!;
+    public DbSet<EntryFileMetadataEntity> EntryFiles { get; set; } = null!;
     public DbSet<EntryRevisionEntity> EntryRevisions { get; set; } = null!;
     public DbSet<ApprovalStepEntity> ApprovalSteps { get; set; } = null!;
     public DbSet<FormPermissionEntity> FormPermissions { get; set; } = null!;
@@ -62,6 +63,7 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.HasMany(x => x.Revisions).WithOne(r => r.Entry).HasForeignKey(r => r.EntryId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.ApprovalSteps).WithOne(a => a.Entry).HasForeignKey(a => a.EntryId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.SearchIndexEntries).WithOne(s => s.Entry).HasForeignKey(s => s.EntryId).OnDelete(DeleteBehavior.Cascade);
+            b.HasMany(x => x.Files).WithOne(f => f.Entry).HasForeignKey(f => f.EntryId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<EntryRevisionEntity>(b =>
@@ -97,6 +99,19 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.Property(x => x.Value).IsRequired();
             b.HasIndex(x => new { x.Key, x.Value });
             b.HasOne(x => x.Entry).WithMany(e => e.SearchIndexEntries).HasForeignKey(x => x.EntryId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<EntryFileMetadataEntity>(b =>
+        {
+            b.ToTable("EntryFiles");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.FieldId).HasMaxLength(128).IsRequired();
+            b.Property(x => x.FileName).HasMaxLength(260).IsRequired();
+            b.Property(x => x.ContentType).HasMaxLength(128).IsRequired();
+            b.Property(x => x.RelativePath).HasMaxLength(512).IsRequired();
+            b.HasIndex(x => x.EntryId);
+            b.HasIndex(x => new { x.EntryId, x.FieldId });
+            b.HasOne(x => x.Entry).WithMany(e => e.Files).HasForeignKey(x => x.EntryId).OnDelete(DeleteBehavior.Cascade);
         });
     }
 }

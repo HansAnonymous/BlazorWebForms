@@ -18,8 +18,7 @@ public static class ServiceCollectionExtensions
         // register EF Core DbContext and EF-backed repository (scoped)
         services.AddDbContext<BlazorWebFormsDbContext>(builder => builder.UseSqlServer(options.ConnectionString));
         services.AddScoped<IFormsRepository, EfFormsRepository>();
-        // fallback in-memory implementations (kept for reference)
-        services.TryAddSingleton<IFormsRepository, InMemorySqlFormsRepository>();
+
         services.TryAddSingleton<IFileStorage, LocalFileStorage>();
         services.TryAddSingleton<IPdfExporter, TextPdfExporter>();
         services.TryAddSingleton<IEmailNotifier, MemoryEmailNotifier>();

@@ -21,7 +21,7 @@ else
             </div>
         </header>
 
-        <DynamicFormRenderer Definition="ViewModel.Definition" Answers="Answers" AnswersChanged="OnAnswersChanged" />
+        <DynamicFormRenderer Definition="ViewModel.Definition" Answers="Answers" AnswersChanged="OnAnswersChanged" FilesChanged="OnFilesChanged" />
 
         <section class="bwf-panel">
             <h3>Approvers</h3>
@@ -49,6 +49,7 @@ else
 
     private PublishedFormViewModel? ViewModel { get; set; }
     private Dictionary<string, string?> Answers { get; } = new(StringComparer.OrdinalIgnoreCase);
+    private List<SubmittedFileInput> Files { get; set; } = [];
     private List<ApproverInput> Approvers { get; } = [new()];
     private string StatusMessage { get; set; } = string.Empty;
 
@@ -68,6 +69,12 @@ else
         return Task.CompletedTask;
     }
 
+    private Task OnFilesChanged(List<SubmittedFileInput> files)
+    {
+        Files = files;
+        return Task.CompletedTask;
+    }
+
     private void AddApprover() => Approvers.Add(new ApproverInput());
 
     private async Task SubmitAsync()
@@ -80,7 +87,8 @@ else
         var entry = await FormsService.SubmitEntryAsync(ViewModel.Form.Id, new SubmitEntryRequest
         {
             Answers = new Dictionary<string, string?>(Answers, StringComparer.OrdinalIgnoreCase),
-            Approvers = Approvers.Where(x => !string.IsNullOrWhiteSpace(x.Email)).ToList()
+            Approvers = Approvers.Where(x => !string.IsNullOrWhiteSpace(x.Email)).ToList(),
+            Files = Files
         });
 
         StatusMessage = $"Submitted entry {entry.Id}.";

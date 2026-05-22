@@ -8,6 +8,7 @@ services.AddBlazorWebFormsCore();
 services.AddSingleton<IFormsRepository, FakeRepository>();
 services.AddSingleton<ICurrentUserContext, FakeCurrentUserContext>();
 services.AddSingleton<IEmailNotifier, FakeEmailNotifier>();
+services.AddSingleton<IFileStorage, FakeFileStorage>();
 
 await using var provider = services.BuildServiceProvider();
 var app = provider.GetRequiredService<FormsApplicationService>();
@@ -137,4 +138,18 @@ internal sealed class FakeEmailNotifier : IEmailNotifier
 {
     public Task NotifyManagersAsync(FormAggregate form, EntryRecord entry, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
+}
+
+internal sealed class FakeFileStorage : IFileStorage
+{
+    public Task<StoredFile> SaveAsync(FileUploadRequest request, CancellationToken cancellationToken = default)
+    {
+        return Task.FromResult(new StoredFile
+        {
+            FileName = request.FileName,
+            ContentType = request.ContentType,
+            Length = request.Content.LongLength,
+            RelativePath = request.FileName
+        });
+    }
 }

@@ -18,7 +18,38 @@ internal sealed class EfFormsRepository : IFormsRepository
 
     public async Task SeedAsync(CancellationToken cancellationToken = default)
     {
-        await db.Database.EnsureCreatedAsync(cancellationToken);
+        var requiresMigration = false;
+        try
+        {
+            var hasAppliedMigrations = await db.Database
+                .SqlQueryRaw<int>("""
+                    SELECT CAST(CASE
+                        WHEN OBJECT_ID(N'__EFMigrationsHistory', N'U') IS NOT NULL
+                             AND EXISTS (SELECT 1 FROM [__EFMigrationsHistory])
+                        THEN 1 ELSE 0 END AS int) AS [Value]
+                    """)
+                .SingleAsync(cancellationToken) == 1;
+
+            var formsTableExists = await db.Database
+                .SqlQueryRaw<int>("""
+                    SELECT CAST(CASE
+                        WHEN OBJECT_ID(N'Forms', N'U') IS NOT NULL
+                        THEN 1 ELSE 0 END AS int) AS [Value]
+                    """)
+                .SingleAsync(cancellationToken) == 1;
+
+            requiresMigration = hasAppliedMigrations || !formsTableExists;
+        }
+        catch
+        {
+            requiresMigration = true;
+        }
+
+        if (requiresMigration)
+        {
+            await db.Database.MigrateAsync(cancellationToken);
+        }
+
         if (await db.Forms.AnyAsync(cancellationToken))
         {
             // if forms exist but no entries, seed demo entry to ensure demo data present
@@ -253,6 +284,8 @@ internal sealed class EfFormsRepository : IFormsRepository
 
     public async Task SaveFormAsync(FormAggregate form, CancellationToken cancellationToken = default)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
         var existing = await db.Forms
             .Include(f => f.Versions)
             .Include(f => f.Permissions)
@@ -317,6 +350,7 @@ internal sealed class EfFormsRepository : IFormsRepository
         }
 
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<EntryRecord>> GetEntriesAsync(Guid? formId, string? search, CancellationToken cancellationToken = default)
@@ -324,25 +358,24 @@ internal sealed class EfFormsRepository : IFormsRepository
         var q = db.Entries
             .Include(e => e.Revisions)
             .Include(e => e.ApprovalSteps)
+            .Include(e => e.Files)
             .Include(e => e.SearchIndexEntries)
             .AsNoTracking();
 
         if (formId.HasValue)
             q = q.Where(e => e.FormId == formId.Value);
 
-        var list = await q.OrderByDescending(e => e.SubmittedUtc).ToListAsync(cancellationToken);
-
-        var converted = list.Select(ToEntryRecord).ToList();
-
         if (!string.IsNullOrWhiteSpace(search))
         {
-            converted = converted.Where(entry =>
-                entry.SearchIndex.Values.Any(value => value.Contains(search, StringComparison.OrdinalIgnoreCase)) ||
-                entry.SubmittedBy.Contains(search, StringComparison.OrdinalIgnoreCase)
-            ).ToList();
+            var searchTerm = search.Trim();
+            q = q.Where(e =>
+                e.SubmittedBy.Contains(searchTerm) ||
+                e.SearchIndexEntries.Any(s => s.Value.Contains(searchTerm)));
         }
 
-        return converted;
+        var list = await q.OrderByDescending(e => e.SubmittedUtc).ToListAsync(cancellationToken);
+
+        return list.Select(ToEntryRecord).ToList();
     }
 
     public async Task<EntryRecord?> GetEntryAsync(Guid entryId, CancellationToken cancellationToken = default)
@@ -350,6 +383,7 @@ internal sealed class EfFormsRepository : IFormsRepository
         var entity = await db.Entries
             .Include(e => e.Revisions)
             .Include(e => e.ApprovalSteps)
+            .Include(e => e.Files)
             .Include(e => e.SearchIndexEntries)
             .AsNoTracking()
             .FirstOrDefaultAsync(e => e.Id == entryId, cancellationToken);
@@ -358,9 +392,13 @@ internal sealed class EfFormsRepository : IFormsRepository
 
     public async Task SaveEntryAsync(EntryRecord entry, CancellationToken cancellationToken = default)
     {
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
         var existing = await db.Entries
             .Include(e => e.Revisions)
             .Include(e => e.ApprovalSteps)
+            .Include(e => e.Files)
+            .Include(e => e.SearchIndexEntries)
             .FirstOrDefaultAsync(e => e.Id == entry.Id, cancellationToken);
 
         if (existing is null)
@@ -421,7 +459,24 @@ internal sealed class EfFormsRepository : IFormsRepository
             });
         }
 
+        db.RemoveRange(existing.Files);
+        existing.Files.Clear();
+        foreach (var file in entry.Files)
+        {
+            existing.Files.Add(new EntryFileMetadataEntity
+            {
+                Id = file.Id,
+                FieldId = file.FieldId,
+                FileName = file.FileName,
+                ContentType = file.ContentType,
+                Length = file.Length,
+                RelativePath = file.RelativePath,
+                UploadedUtc = file.UploadedUtc
+            });
+        }
+
         await db.SaveChangesAsync(cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private FormAggregate ToAggregate(FormEntity entity)
@@ -478,6 +533,16 @@ internal sealed class EfFormsRepository : IFormsRepository
             Status = (EntryStatus)entity.Status,
             Answers = new Dictionary<string, string?>(entity.Answers, StringComparer.OrdinalIgnoreCase),
             SearchIndex = new Dictionary<string, string>(entity.SearchIndex, StringComparer.OrdinalIgnoreCase),
+            Files = entity.Files.Select(f => new EntryFileRecord
+            {
+                Id = f.Id,
+                FieldId = f.FieldId,
+                FileName = f.FileName,
+                ContentType = f.ContentType,
+                Length = f.Length,
+                RelativePath = f.RelativePath,
+                UploadedUtc = f.UploadedUtc
+            }).ToList(),
             Revisions = entity.Revisions.Select(r => new EntryRevisionRecord
             {
                 Id = r.Id,
