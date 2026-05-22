@@ -1,0 +1,18 @@
+﻿################################################################################
+# This .gitignore file was automatically created by Microsoft(R) Visual Studio.
+################################################################################
+
+/.vs
+/src/BlazorWebForms.Blazor/bin/Debug/net10.0
+/src/BlazorWebForms.Blazor/obj
+/src/BlazorWebForms.Core/bin/Debug/net10.0
+/src/BlazorWebForms.Core/obj
+/src/BlazorWebForms.Infrastructure.SqlServer/bin/Debug/net10.0
+/src/BlazorWebForms.Infrastructure.SqlServer/obj
+/src/BlazorWebForms.SampleApp/bin/Debug/net10.0
+/src/BlazorWebForms.SampleApp/obj
+/tests/BlazorWebForms.Core.Tests/bin/Debug/net10.0
+/tests/BlazorWebForms.Core.Tests/obj/Debug/net10.0
+/tests/BlazorWebForms.Infrastructure.SqlServer.Tests/bin/Debug/net10.0
+/tests/BlazorWebForms.Infrastructure.SqlServer.Tests/obj
+/tests/BlazorWebForms.Core.Tests/obj
