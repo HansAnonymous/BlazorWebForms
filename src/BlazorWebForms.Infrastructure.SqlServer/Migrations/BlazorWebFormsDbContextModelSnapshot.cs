@@ -55,6 +55,11 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
 
                     b.HasIndex("EntryId");
 
+                    b.HasIndex("EntryId", "Order")
+                        .IsUnique();
+
+                    b.HasIndex("Status");
+
                     b.ToTable("ApprovalSteps", (string)null);
                 });
 
@@ -73,6 +78,11 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
 
                     b.Property<Guid>("FormVersionId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
 
                     b.Property<string>("SearchIndex")
                         .IsRequired()
@@ -97,6 +107,14 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("FormId");
+
+                    b.HasIndex("FormId", "Status", "SubmittedUtc");
+
+                    b.HasIndex("FormId", "SubmittedUtc");
+
+                    b.HasIndex("Status");
+
+                    b.HasIndex("SubmittedUtc");
 
                     b.ToTable("Entries", (string)null);
                 });
@@ -127,6 +145,9 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("EntryId");
+
+                    b.HasIndex("EntryId", "RevisionNumber")
+                        .IsUnique();
 
                     b.ToTable("EntryRevisions", (string)null);
                 });
@@ -196,6 +217,8 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
 
                     b.HasIndex("EntryId");
 
+                    b.HasIndex("EntryId", "Key");
+
                     b.HasIndex("Key", "Value");
 
                     b.ToTable("EntrySearchIndex", (string)null);
@@ -243,10 +266,23 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<DateTimeOffset>("UpdatedUtc")
                         .HasColumnType("datetimeoffset");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique();
+
+                    b.HasIndex("PublicationSlug")
+                        .IsUnique();
+
+                    b.HasIndex("UpdatedUtc");
 
                     b.ToTable("Forms", (string)null);
                 });
@@ -274,6 +310,9 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
 
                     b.HasIndex("FormId");
 
+                    b.HasIndex("FormId", "Email")
+                        .IsUnique();
+
                     b.ToTable("FormNotifications", (string)null);
                 });
 
@@ -300,6 +339,9 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
 
                     b.HasIndex("FormId");
 
+                    b.HasIndex("FormId", "UserId")
+                        .IsUnique();
+
                     b.ToTable("FormPermissions", (string)null);
                 });
 
@@ -325,6 +367,9 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("FormId");
+
+                    b.HasIndex("FormId", "VersionNumber")
+                        .IsUnique();
 
                     b.ToTable("FormVersions", (string)null);
                 });

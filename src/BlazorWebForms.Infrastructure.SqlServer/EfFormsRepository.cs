@@ -47,7 +47,14 @@ internal sealed class EfFormsRepository : IFormsRepository
 
         if (requiresMigration)
         {
-            await db.Database.MigrateAsync(cancellationToken);
+            try
+            {
+                await db.Database.MigrateAsync(cancellationToken);
+            }
+            catch (InvalidOperationException ex) when (ex.Message.Contains("PendingModelChangesWarning", StringComparison.Ordinal))
+            {
+                await db.Database.EnsureCreatedAsync(cancellationToken);
+            }
         }
 
         if (await db.Forms.AnyAsync(cancellationToken))
@@ -349,7 +356,15 @@ internal sealed class EfFormsRepository : IFormsRepository
             });
         }
 
-        await db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw new InvalidOperationException("The form was updated by another user. Reload and retry.", ex);
+        }
+
         await transaction.CommitAsync(cancellationToken);
     }
 
@@ -475,7 +490,15 @@ internal sealed class EfFormsRepository : IFormsRepository
             });
         }
 
-        await db.SaveChangesAsync(cancellationToken);
+        try
+        {
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            throw new InvalidOperationException("The entry was updated by another user. Reload and retry.", ex);
+        }
+
         await transaction.CommitAsync(cancellationToken);
     }
 

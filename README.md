@@ -38,6 +38,13 @@ Configuration
 
 Migrations
 - Migration files live in `src/BlazorWebForms.Infrastructure.SqlServer/Migrations/`.
+- Generate and review SQL script before apply:
+
+```powershell
+dotnet ef migrations script --project src/BlazorWebForms.Infrastructure.SqlServer/BlazorWebForms.Infrastructure.SqlServer.csproj --startup-project src/BlazorWebForms.SampleApp/BlazorWebForms.SampleApp.csproj
+```
+
+- SQL compatibility note: current migrations use SQL Server/Azure SQL compatible types (`uniqueidentifier`, `nvarchar`, `datetimeoffset`, `rowversion`) and are validated in local integration runs.
 
 Tests
 

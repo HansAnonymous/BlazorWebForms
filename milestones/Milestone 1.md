@@ -39,7 +39,7 @@ This checklist breaks Milestone 1 into execution-ordered tasks.
 - [x] Implement searchable-field extraction from submission answers into index rows.
 - [x] Persist normalized key/value index records during submit/edit operations.
 - [ ] Add repository query methods for common admin filters (form, status, date, indexed field value).
-- [ ] Add SQL indexes for expected predicates (form ID, created date, status, indexed key/value).
+- [x] Add SQL indexes for expected predicates (form ID, created date, status, indexed key/value).
 
 ## 5) Historical Render Path
 - [x] On entry-detail load, always resolve the exact `FormVersionId` tied to that submission/revision.
@@ -61,6 +61,8 @@ This checklist breaks Milestone 1 into execution-ordered tasks.
 - 2026-05-21: Added transaction boundaries around form and entry persistence to cover publish/submit/approve write paths in `src/BlazorWebForms.Infrastructure.SqlServer/EfFormsRepository.cs`.
 - 2026-05-21: Added historical-render guardrails with warning fallback for missing/invalid version JSON in `src/BlazorWebForms.Core/Services/FormsApplicationService.cs` and surfaced warning in `src/BlazorWebForms.SampleApp/Components/Pages/EntryDetail.razor`.
 - 2026-05-21: Extended test coverage for file metadata persistence and migration-backed DB flow in `tests/BlazorWebForms.Infrastructure.SqlServer.Tests/Program.cs`.
+- 2026-05-21: Added rowversion concurrency tokens and baseline admin/query indexes in EF model plus migration `src/BlazorWebForms.Infrastructure.SqlServer/Migrations/20260521093000_AddConcurrencyAndAdminIndexes.cs`.
+- 2026-05-21: Documented migration SQL script review and SQL compatibility note in `README.md`.
 
 ## 7) Tests
 - [ ] Add integration tests for DbContext mappings and migration smoke test.
@@ -75,8 +77,8 @@ This checklist breaks Milestone 1 into execution-ordered tasks.
 
 ## 8) Data Safety and Performance Baseline
 - [x] Add transaction boundaries for multi-write operations (publish, submit, approve).
-- [ ] Add optimistic concurrency tokens where needed (rowversion/timestamp).
-- [ ] Add baseline indexes and run simple query-plan sanity checks.
+- [x] Add optimistic concurrency tokens where needed (rowversion/timestamp).
+- [x] Add baseline indexes and run simple query-plan sanity checks.
 - [ ] Validate expected behavior under parallel submissions/edits.
 
 ## 9) Done Criteria (Milestone Exit)

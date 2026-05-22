@@ -17,6 +17,7 @@ public class FormEntity
     public string PublicationDomain { get; set; } = string.Empty;
     public int PublicationAccessMode { get; set; }
     public bool PublicationSendSubmissionCopyToSubmitter { get; set; }
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     public ICollection<FormVersionEntity> Versions { get; set; } = new List<FormVersionEntity>();
     public ICollection<FormPermissionEntity> Permissions { get; set; } = new List<FormPermissionEntity>();
@@ -65,6 +66,7 @@ public class EntryEntity
     public int Status { get; set; }
     public Dictionary<string, string?> Answers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> SearchIndex { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     public ICollection<EntryRevisionEntity> Revisions { get; set; } = new List<EntryRevisionEntity>();
     public ICollection<ApprovalStepEntity> ApprovalSteps { get; set; } = new List<ApprovalStepEntity>();

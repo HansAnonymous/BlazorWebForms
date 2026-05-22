@@ -40,6 +40,10 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.Property(x => x.Name).IsRequired();
             b.Property(x => x.Description).HasMaxLength(2000);
             b.Property(x => x.DraftDefinitionJson).HasColumnType("nvarchar(max)");
+            b.Property(x => x.RowVersion).IsRowVersion();
+            b.HasIndex(x => x.Key).IsUnique();
+            b.HasIndex(x => x.PublicationSlug).IsUnique();
+            b.HasIndex(x => x.UpdatedUtc);
             b.HasMany(x => x.Versions).WithOne(v => v.Form).HasForeignKey(v => v.FormId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Permissions).WithOne(p => p.Form).HasForeignKey(p => p.FormId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Notifications).WithOne(n => n.Form).HasForeignKey(n => n.FormId).OnDelete(DeleteBehavior.Cascade);
@@ -50,6 +54,7 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.ToTable("FormVersions");
             b.HasKey(x => x.Id);
             b.Property(x => x.DefinitionJson).HasColumnType("nvarchar(max)");
+            b.HasIndex(x => new { x.FormId, x.VersionNumber }).IsUnique();
         });
 
         modelBuilder.Entity<EntryEntity>(b =>
@@ -60,6 +65,12 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.Property(x => x.SubmittedByEmail).HasMaxLength(256);
             b.Property(x => x.Answers).HasConversion(dictNullableConverter).HasColumnType("nvarchar(max)");
             b.Property(x => x.SearchIndex).HasConversion(dictStringConverter).HasColumnType("nvarchar(max)");
+            b.Property(x => x.RowVersion).IsRowVersion();
+            b.HasIndex(x => x.FormId);
+            b.HasIndex(x => new { x.FormId, x.SubmittedUtc });
+            b.HasIndex(x => new { x.FormId, x.Status, x.SubmittedUtc });
+            b.HasIndex(x => x.Status);
+            b.HasIndex(x => x.SubmittedUtc);
             b.HasMany(x => x.Revisions).WithOne(r => r.Entry).HasForeignKey(r => r.EntryId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.ApprovalSteps).WithOne(a => a.Entry).HasForeignKey(a => a.EntryId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.SearchIndexEntries).WithOne(s => s.Entry).HasForeignKey(s => s.EntryId).OnDelete(DeleteBehavior.Cascade);
@@ -71,24 +82,29 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.ToTable("EntryRevisions");
             b.HasKey(x => x.Id);
             b.Property(x => x.Answers).HasConversion(dictNullableConverter).HasColumnType("nvarchar(max)");
+            b.HasIndex(x => new { x.EntryId, x.RevisionNumber }).IsUnique();
         });
 
         modelBuilder.Entity<ApprovalStepEntity>(b =>
         {
             b.ToTable("ApprovalSteps");
             b.HasKey(x => x.Id);
+            b.HasIndex(x => new { x.EntryId, x.Order }).IsUnique();
+            b.HasIndex(x => x.Status);
         });
 
         modelBuilder.Entity<FormPermissionEntity>(b =>
         {
             b.ToTable("FormPermissions");
             b.HasKey(x => x.Id);
+            b.HasIndex(x => new { x.FormId, x.UserId }).IsUnique();
         });
 
         modelBuilder.Entity<FormNotificationEntity>(b =>
         {
             b.ToTable("FormNotifications");
             b.HasKey(x => x.Id);
+            b.HasIndex(x => new { x.FormId, x.Email }).IsUnique();
         });
 
         modelBuilder.Entity<EntrySearchIndexEntity>(b =>
@@ -98,6 +114,7 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.Property(x => x.Key).IsRequired();
             b.Property(x => x.Value).IsRequired();
             b.HasIndex(x => new { x.Key, x.Value });
+            b.HasIndex(x => new { x.EntryId, x.Key });
             b.HasOne(x => x.Entry).WithMany(e => e.SearchIndexEntries).HasForeignKey(x => x.EntryId).OnDelete(DeleteBehavior.Cascade);
         });
 
