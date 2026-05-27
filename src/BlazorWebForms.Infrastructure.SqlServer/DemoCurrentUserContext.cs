@@ -11,6 +11,7 @@ internal sealed class DemoCurrentUserContext : ICurrentUserContext
         new()
         {
             UserId = DefaultUserId,
+            IsAuthenticated = true,
             DisplayName = "Casey Manager",
             Email = "casey@example.com",
             Roles = [FormPermissionRole.Owner, FormPermissionRole.Manager]

@@ -9,6 +9,7 @@ internal sealed class InMemorySqlFormsRepository(IFormDefinitionSerializer seria
 {
     private readonly ConcurrentDictionary<Guid, FormAggregate> forms = new();
     private readonly ConcurrentDictionary<Guid, EntryRecord> entries = new();
+    private readonly ConcurrentDictionary<Guid, FormInvitation> invitations = new();
     private int seeded;
 
     public Task SeedAsync(CancellationToken cancellationToken = default)
@@ -188,6 +189,35 @@ internal sealed class InMemorySqlFormsRepository(IFormDefinitionSerializer seria
         return Task.CompletedTask;
     }
 
+    public Task<IReadOnlyList<FormInvitation>> GetInvitationsAsync(Guid formId, CancellationToken cancellationToken = default)
+    {
+        IEnumerable<FormInvitation> query = invitations.Values;
+        if (formId != Guid.Empty)
+        {
+            query = query.Where(i => i.FormId == formId);
+        }
+
+        return Task.FromResult<IReadOnlyList<FormInvitation>>(query.Select(CloneInvitation).ToList());
+    }
+
+    public Task<FormInvitation?> GetInvitationAsync(Guid invitationId, CancellationToken cancellationToken = default)
+    {
+        invitations.TryGetValue(invitationId, out var invitation);
+        return Task.FromResult(invitation is null ? null : CloneInvitation(invitation));
+    }
+
+    public Task<FormInvitation?> GetInvitationByTokenAsync(string token, CancellationToken cancellationToken = default)
+    {
+        var invitation = invitations.Values.FirstOrDefault(i => string.Equals(i.Token, token, StringComparison.Ordinal));
+        return Task.FromResult(invitation is null ? null : CloneInvitation(invitation));
+    }
+
+    public Task SaveInvitationAsync(FormInvitation invitation, CancellationToken cancellationToken = default)
+    {
+        invitations[invitation.Id] = CloneInvitation(invitation);
+        return Task.CompletedTask;
+    }
+
     private static FormAggregate CloneForm(FormAggregate form) =>
         new()
         {
@@ -217,7 +247,9 @@ internal sealed class InMemorySqlFormsRepository(IFormDefinitionSerializer seria
             {
                 UserId = permission.UserId,
                 DisplayName = permission.DisplayName,
-                Role = permission.Role
+                Role = permission.Role,
+                ScopeType = permission.ScopeType,
+                ScopeValue = permission.ScopeValue
             }).ToList(),
             Notifications = form.Notifications.Select(notification => new FormNotificationRule
             {
@@ -295,5 +327,23 @@ internal sealed class InMemorySqlFormsRepository(IFormDefinitionSerializer seria
                 Signature = step.Signature,
                 CompletedUtc = step.CompletedUtc
             }).ToList()
+        };
+
+    private static FormInvitation CloneInvitation(FormInvitation invitation) =>
+        new()
+        {
+            Id = invitation.Id,
+            FormId = invitation.FormId,
+            Email = invitation.Email,
+            Role = invitation.Role,
+            ScopeType = invitation.ScopeType,
+            ScopeValue = invitation.ScopeValue,
+            Token = invitation.Token,
+            ExpiresUtc = invitation.ExpiresUtc,
+            Status = invitation.Status,
+            CreatedByUserId = invitation.CreatedByUserId,
+            CreatedUtc = invitation.CreatedUtc,
+            UpdatedByUserId = invitation.UpdatedByUserId,
+            UpdatedUtc = invitation.UpdatedUtc
         };
 }

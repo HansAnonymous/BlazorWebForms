@@ -16,13 +16,15 @@ public sealed class FormsApplicationService(
 
     public async Task<DashboardViewModel> GetDashboardAsync(CancellationToken cancellationToken = default)
     {
+        var user = currentUserContext.GetCurrentUser();
         var forms = await repository.GetFormsAsync(cancellationToken);
         var entries = await repository.GetEntriesAsync(null, null, cancellationToken);
 
         return new DashboardViewModel
         {
             Forms = forms.OrderBy(f => f.Name).ToList(),
-            RecentEntries = entries.OrderByDescending(e => e.SubmittedUtc).Take(10).ToList()
+            RecentEntries = entries.OrderByDescending(e => e.SubmittedUtc).Take(10).ToList(),
+            CurrentUser = user
         };
     }
 
@@ -34,6 +36,11 @@ public sealed class FormsApplicationService(
             : CreateEmptyForm(user);
 
         form ??= CreateEmptyForm(user);
+
+        if (!permissionEvaluator.CanManageForm(form, user))
+        {
+            throw new InvalidOperationException("Current user cannot access this form in builder.");
+        }
 
         return new BuilderState
         {
@@ -50,6 +57,11 @@ public sealed class FormsApplicationService(
             : null;
 
         form ??= CreateEmptyForm(user);
+
+        if (!permissionEvaluator.CanManageForm(form, user))
+        {
+            throw new InvalidOperationException("Current user cannot edit this form.");
+        }
 
         form.Name = request.Name;
         form.Description = request.Description;
@@ -70,7 +82,8 @@ public sealed class FormsApplicationService(
             {
                 UserId = user.UserId,
                 DisplayName = user.DisplayName,
-                Role = FormPermissionRole.Owner
+                Role = FormPermissionRole.Owner,
+                ScopeType = "Form"
             });
         }
 
@@ -237,6 +250,15 @@ public sealed class FormsApplicationService(
         var step = entry.ApprovalSteps.FirstOrDefault(candidate => candidate.Id == stepId)
                    ?? throw new InvalidOperationException("Approval step not found.");
 
+        var user = currentUserContext.GetCurrentUser();
+        var form = await repository.GetFormAsync(entry.FormId, cancellationToken)
+                   ?? throw new InvalidOperationException("Form not found.");
+        var isApprover = string.Equals(step.ApproverEmail, user.Email, StringComparison.OrdinalIgnoreCase);
+        if (!(permissionEvaluator.CanManageForm(form, user) || isApprover || user.Roles.Contains(FormPermissionRole.Admin)))
+        {
+            throw new InvalidOperationException("Current user cannot approve this step.");
+        }
+
         step.Status = ApprovalStepStatus.Approved;
         step.Signature = signature;
         step.CompletedUtc = DateTimeOffset.UtcNow;
@@ -293,6 +315,11 @@ public sealed class FormsApplicationService(
         }
 
         var user = currentUserContext.GetCurrentUser();
+        if (!permissionEvaluator.CanViewEntry(form, entry, user))
+        {
+            return null;
+        }
+
         return new EntryDetailViewModel
         {
             Form = form,
@@ -313,8 +340,156 @@ public sealed class FormsApplicationService(
         return await fileStorage.SaveAsync(input.Request, cancellationToken);
     }
 
+    public async Task<FormInvitation> CreateInvitationAsync(CreateInvitationRequest request, CancellationToken cancellationToken = default)
+    {
+        var user = currentUserContext.GetCurrentUser();
+        var form = await repository.GetFormAsync(request.FormId, cancellationToken)
+                   ?? throw new InvalidOperationException("Form not found.");
+
+        if (!permissionEvaluator.CanManageForm(form, user))
+        {
+            throw new InvalidOperationException("Current user cannot manage invitations for this form.");
+        }
+
+        var existingInvitations = await repository.GetInvitationsAsync(request.FormId, cancellationToken);
+        var duplicatePending = existingInvitations.Any(i =>
+            i.Status == InvitationStatus.Pending &&
+            i.ExpiresUtc > DateTimeOffset.UtcNow &&
+            i.Role == request.Role &&
+            string.Equals(i.Email, request.Email, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(i.ScopeType, request.ScopeType, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(i.ScopeValue ?? string.Empty, request.ScopeValue ?? string.Empty, StringComparison.OrdinalIgnoreCase));
+
+        if (duplicatePending)
+        {
+            throw new InvalidOperationException("A pending invitation already exists for this user and scope.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Email))
+        {
+            throw new InvalidOperationException("Invitation email is required.");
+        }
+
+        if (request.ValidFor <= TimeSpan.Zero || request.ValidFor > TimeSpan.FromDays(30))
+        {
+            throw new InvalidOperationException("Invitation validity must be between 1 second and 30 days.");
+        }
+
+        var invitation = new FormInvitation
+        {
+            FormId = request.FormId,
+            Email = request.Email.Trim(),
+            Role = request.Role,
+            ScopeType = string.IsNullOrWhiteSpace(request.ScopeType) ? "Form" : request.ScopeType,
+            ScopeValue = request.ScopeValue,
+            Token = Convert.ToBase64String(Guid.NewGuid().ToByteArray())
+                .Replace('+', '-')
+                .Replace('/', '_')
+                .TrimEnd('='),
+            ExpiresUtc = DateTimeOffset.UtcNow.Add(request.ValidFor),
+            Status = InvitationStatus.Pending,
+            CreatedByUserId = user.UserId,
+            CreatedUtc = DateTimeOffset.UtcNow
+        };
+
+        await repository.SaveInvitationAsync(invitation, cancellationToken);
+        await emailNotifier.NotifyInvitationCreatedAsync(form, invitation, cancellationToken);
+        return invitation;
+    }
+
+    public Task<IReadOnlyList<FormInvitation>> GetInvitationsAsync(Guid formId, CancellationToken cancellationToken = default) =>
+        repository.GetInvitationsAsync(formId, cancellationToken);
+
+    public async Task<FormInvitation> AcceptInvitationAsync(string token, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            throw new InvalidOperationException("Invitation token is required.");
+        }
+
+        var user = currentUserContext.GetCurrentUser();
+        if (!user.IsAuthenticated)
+        {
+            throw new InvalidOperationException("Current user must be authenticated to accept invitations.");
+        }
+
+        var invitation = await repository.GetInvitationByTokenAsync(token, cancellationToken)
+                         ?? throw new InvalidOperationException("Invitation not found.");
+
+        if (invitation.Status != InvitationStatus.Pending)
+        {
+            throw new InvalidOperationException("Invitation is no longer pending.");
+        }
+
+        if (invitation.ExpiresUtc <= DateTimeOffset.UtcNow)
+        {
+            invitation.Status = InvitationStatus.Expired;
+            invitation.UpdatedUtc = DateTimeOffset.UtcNow;
+            invitation.UpdatedByUserId = user.UserId;
+            await repository.SaveInvitationAsync(invitation, cancellationToken);
+            throw new InvalidOperationException("Invitation has expired.");
+        }
+
+        var form = await repository.GetFormAsync(invitation.FormId, cancellationToken)
+                   ?? throw new InvalidOperationException("Form not found.");
+
+        var existing = form.Permissions.FirstOrDefault(p => p.UserId == user.UserId);
+        if (existing is null)
+        {
+            form.Permissions.Add(new FormPermissionGrant
+            {
+                UserId = user.UserId,
+                DisplayName = user.DisplayName,
+                Role = invitation.Role,
+                ScopeType = invitation.ScopeType,
+                ScopeValue = invitation.ScopeValue
+            });
+        }
+        else
+        {
+            existing.Role = invitation.Role;
+            existing.ScopeType = invitation.ScopeType;
+            existing.ScopeValue = invitation.ScopeValue;
+        }
+
+        await repository.SaveFormAsync(form, cancellationToken);
+
+        invitation.Status = InvitationStatus.Accepted;
+        invitation.UpdatedUtc = DateTimeOffset.UtcNow;
+        invitation.UpdatedByUserId = user.UserId;
+        await repository.SaveInvitationAsync(invitation, cancellationToken);
+        await emailNotifier.NotifyInvitationAcceptedAsync(form, invitation, cancellationToken);
+        return invitation;
+    }
+
+    public async Task<FormInvitation> RevokeInvitationAsync(Guid invitationId, CancellationToken cancellationToken = default)
+    {
+        var user = currentUserContext.GetCurrentUser();
+        var invitation = await repository.GetInvitationAsync(invitationId, cancellationToken)
+                         ?? throw new InvalidOperationException("Invitation not found.");
+
+        var form = await repository.GetFormAsync(invitation.FormId, cancellationToken)
+                   ?? throw new InvalidOperationException("Form not found.");
+        if (!permissionEvaluator.CanManageForm(form, user))
+        {
+            throw new InvalidOperationException("Current user cannot revoke invitations for this form.");
+        }
+
+        invitation.Status = InvitationStatus.Revoked;
+        invitation.UpdatedByUserId = user.UserId;
+        invitation.UpdatedUtc = DateTimeOffset.UtcNow;
+        await repository.SaveInvitationAsync(invitation, cancellationToken);
+        await emailNotifier.NotifyInvitationRevokedAsync(form, invitation, cancellationToken);
+        return invitation;
+    }
+
     private static FormAggregate CreateEmptyForm(UserProfile user)
     {
+        if (!user.IsAuthenticated)
+        {
+            throw new InvalidOperationException("Anonymous users cannot create forms.");
+        }
+
         var form = new FormAggregate
         {
             OwnerUserId = user.UserId,

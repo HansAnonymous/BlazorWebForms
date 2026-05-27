@@ -32,6 +32,9 @@ public interface IPdfExporter
 public interface IEmailNotifier
 {
     Task NotifyManagersAsync(FormAggregate form, EntryRecord entry, CancellationToken cancellationToken = default);
+    Task NotifyInvitationCreatedAsync(FormAggregate form, FormInvitation invitation, CancellationToken cancellationToken = default);
+    Task NotifyInvitationAcceptedAsync(FormAggregate form, FormInvitation invitation, CancellationToken cancellationToken = default);
+    Task NotifyInvitationRevokedAsync(FormAggregate form, FormInvitation invitation, CancellationToken cancellationToken = default);
 }
 
 public interface ICurrentUserContext
@@ -57,4 +60,9 @@ public interface IFormsRepository
     Task<IReadOnlyList<EntryRecord>> QueryEntriesAsync(EntryQueryOptions options, CancellationToken cancellationToken = default);
     Task<EntryRecord?> GetEntryAsync(Guid entryId, CancellationToken cancellationToken = default);
     Task SaveEntryAsync(EntryRecord entry, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<FormInvitation>> GetInvitationsAsync(Guid formId, CancellationToken cancellationToken = default);
+    Task<FormInvitation?> GetInvitationAsync(Guid invitationId, CancellationToken cancellationToken = default);
+    Task<FormInvitation?> GetInvitationByTokenAsync(string token, CancellationToken cancellationToken = default);
+    Task SaveInvitationAsync(FormInvitation invitation, CancellationToken cancellationToken = default);
 }

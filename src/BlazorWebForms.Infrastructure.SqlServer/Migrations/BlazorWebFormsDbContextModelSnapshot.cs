@@ -285,6 +285,65 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                     b.ToTable("Forms", (string)null);
                 });
 
+            modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.FormInvitationEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTimeOffset>("ExpiresUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("FormId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ScopeType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("ScopeValue")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTimeOffset?>("UpdatedUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FormId", "Email", "Status");
+
+                    b.HasIndex("Token")
+                        .IsUnique();
+
+                    b.ToTable("FormInvitations", (string)null);
+                });
+
             modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.FormNotificationEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -314,6 +373,65 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                     b.ToTable("FormNotifications", (string)null);
                 });
 
+            modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.FormInvitationEntity", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset>("CreatedUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTimeOffset>("ExpiresUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("FormId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Role")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ScopeType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("ScopeValue")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Token")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTimeOffset?>("UpdatedUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FormId", "Email", "Status");
+
+                    b.HasIndex("Token")
+                        .IsUnique();
+
+                    b.ToTable("FormInvitations", (string)null);
+                });
+
             modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.FormPermissionEntity", b =>
                 {
                     b.Property<Guid>("Id")
@@ -330,6 +448,21 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                     b.Property<int>("Role")
                         .HasColumnType("int");
 
+                    b.Property<string>("ScopeType")
+                        .IsRequired()
+                        .HasMaxLength(32)
+                        .HasColumnType("nvarchar(32)");
+
+                    b.Property<string>("ScopeValue")
+                        .HasMaxLength(128)
+                        .HasColumnType("nvarchar(128)");
+
+                    b.Property<DateTimeOffset>("UpdatedUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("UpdatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("UserId")
                         .HasColumnType("uniqueidentifier");
 
@@ -339,6 +472,8 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
 
                     b.HasIndex("FormId", "UserId")
                         .IsUnique();
+
+                    b.HasIndex("FormId", "ScopeType", "ScopeValue");
 
                     b.ToTable("FormPermissions", (string)null);
                 });
@@ -405,6 +540,17 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                     b.Navigation("Form");
                 });
 
+            modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.FormInvitationEntity", b =>
+                {
+                    b.HasOne("BlazorWebForms.Infrastructure.SqlServer.FormEntity", "Form")
+                        .WithMany()
+                        .HasForeignKey("FormId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Form");
+                });
+
             modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.EntryRevisionEntity", b =>
                 {
                     b.HasOne("BlazorWebForms.Infrastructure.SqlServer.EntryEntity", "Entry")
@@ -431,6 +577,17 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                 {
                     b.HasOne("BlazorWebForms.Infrastructure.SqlServer.FormEntity", "Form")
                         .WithMany("Notifications")
+                        .HasForeignKey("FormId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Form");
+                });
+
+            modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.FormInvitationEntity", b =>
+                {
+                    b.HasOne("BlazorWebForms.Infrastructure.SqlServer.FormEntity", "Form")
+                        .WithMany()
                         .HasForeignKey("FormId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();

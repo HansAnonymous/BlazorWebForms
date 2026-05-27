@@ -42,6 +42,10 @@ public class FormPermissionEntity
     public Guid UserId { get; set; }
     public string DisplayName { get; set; } = string.Empty;
     public int Role { get; set; }
+    public string ScopeType { get; set; } = "Form";
+    public string? ScopeValue { get; set; }
+    public Guid UpdatedByUserId { get; set; }
+    public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public class FormNotificationEntity
@@ -118,4 +122,22 @@ public class EntryFileMetadataEntity
     public long Length { get; set; }
     public string RelativePath { get; set; } = string.Empty;
     public DateTimeOffset UploadedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public class FormInvitationEntity
+{
+    public Guid Id { get; set; }
+    public Guid FormId { get; set; }
+    public FormEntity? Form { get; set; }
+    public string Email { get; set; } = string.Empty;
+    public int Role { get; set; }
+    public string ScopeType { get; set; } = "Form";
+    public string? ScopeValue { get; set; }
+    public string Token { get; set; } = string.Empty;
+    public DateTimeOffset ExpiresUtc { get; set; }
+    public int Status { get; set; }
+    public Guid CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public Guid? UpdatedByUserId { get; set; }
+    public DateTimeOffset? UpdatedUtc { get; set; }
 }

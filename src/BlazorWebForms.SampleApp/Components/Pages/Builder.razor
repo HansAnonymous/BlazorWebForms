@@ -1,9 +1,12 @@
 @page "/builder"
 @page "/builder/{FormId:guid}"
+@attribute [Authorize(Policy = AuthPolicies.BuilderAccess)]
 
 <PageTitle>Builder</PageTitle>
 
 <FormBuilderWorkspace FormId="FormId" />
+
+<p class="bwf-help">Builder is restricted to Manager/Owner/Admin roles.</p>
 
 @code {
     [Parameter] public Guid? FormId { get; set; }

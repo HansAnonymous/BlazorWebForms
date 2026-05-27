@@ -1,8 +1,11 @@
 @page "/forms/{Slug}"
+@attribute [Authorize(Policy = AuthPolicies.SelfViewAccess)]
 
 <PageTitle>Published Form</PageTitle>
 
 <PublishedFormView Slug="Slug" />
+
+<p class="bwf-help">Published form route requires authenticated access in this sample configuration.</p>
 
 @code {
     [Parameter, EditorRequired] public required string Slug { get; set; }

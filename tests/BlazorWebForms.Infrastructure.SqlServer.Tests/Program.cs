@@ -165,6 +165,20 @@ var parallelEntries = await forms.QueryEntriesAsync(new EntryQueryOptions
 });
 Assert(parallelEntries.Count >= 5, "Parallel submission entries are queryable.");
 
+// invitation flow smoke
+var invitation = await forms.CreateInvitationAsync(new CreateInvitationRequest
+{
+    FormId = newForm.Id,
+    Email = "invitee-sql@example.com",
+    Role = FormPermissionRole.Viewer,
+    ScopeType = "Form",
+    ValidFor = TimeSpan.FromDays(2)
+});
+Assert(invitation.Status == InvitationStatus.Pending, "Invitation persisted in SQL starts pending.");
+
+var storedInvitation = await repository.GetInvitationByTokenAsync(invitation.Token);
+Assert(storedInvitation is not null, "Invitation is queryable by token from SQL repository.");
+
 Console.WriteLine("Infrastructure tests passed.");
 
 static void Assert(bool condition, string message)

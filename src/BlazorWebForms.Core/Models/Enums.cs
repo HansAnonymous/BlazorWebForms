@@ -27,7 +27,8 @@ public enum FormPermissionRole
     Approver,
     Submitter,
     Viewer,
-    SelfViewer
+    SelfViewer,
+    Admin
 }
 
 public enum EntryStatus
@@ -42,4 +43,12 @@ public enum ApprovalStepStatus
 {
     Pending,
     Approved
+}
+
+public enum InvitationStatus
+{
+    Pending,
+    Accepted,
+    Revoked,
+    Expired
 }

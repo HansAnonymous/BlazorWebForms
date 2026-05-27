@@ -61,20 +61,26 @@ internal sealed class DefaultFieldComponentRegistry : IFieldComponentRegistry
 
 internal sealed class DefaultPermissionEvaluator : IPermissionEvaluator
 {
+    private static bool IsAdmin(UserProfile user) => user.Roles.Contains(FormPermissionRole.Admin);
+
     public bool CanManageForm(FormAggregate form, UserProfile user) =>
+        IsAdmin(user) ||
         form.OwnerUserId == user.UserId ||
         user.Roles.Contains(FormPermissionRole.Owner) ||
         form.Permissions.Any(p => p.UserId == user.UserId &&
-                                  (p.Role == FormPermissionRole.Owner || p.Role == FormPermissionRole.Manager));
+                                  (p.Role == FormPermissionRole.Owner || p.Role == FormPermissionRole.Manager) &&
+                                  (string.IsNullOrWhiteSpace(p.ScopeType) || p.ScopeType.Equals("Form", StringComparison.OrdinalIgnoreCase) || p.ScopeType.Equals("Global", StringComparison.OrdinalIgnoreCase)));
 
     public bool CanSubmitForm(FormAggregate form, UserProfile user) =>
         form.Publication.AccessMode == FormAccessMode.Public ||
         CanManageForm(form, user) ||
-        user.UserId != Guid.Empty;
+        user.IsAuthenticated;
 
     public bool CanViewEntry(FormAggregate form, EntryRecord entry, UserProfile user) =>
+        IsAdmin(user) ||
         CanManageForm(form, user) ||
         string.Equals(entry.SubmittedByEmail, user.Email, StringComparison.OrdinalIgnoreCase) ||
         form.Permissions.Any(p => p.UserId == user.UserId &&
-                                  (p.Role == FormPermissionRole.Viewer || p.Role == FormPermissionRole.SelfViewer));
+                                  (p.Role == FormPermissionRole.Viewer || p.Role == FormPermissionRole.SelfViewer) &&
+                                  (string.IsNullOrWhiteSpace(p.ScopeType) || p.ScopeType.Equals("Form", StringComparison.OrdinalIgnoreCase) || p.ScopeType.Equals("Global", StringComparison.OrdinalIgnoreCase)));
 }

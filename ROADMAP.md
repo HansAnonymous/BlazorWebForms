@@ -35,6 +35,9 @@ This repository currently contains a working V1 scaffold: domain model + service
 ### Current Storage Reality (Important)
 Milestone 1 is now implemented with EF Core + SQL persistence, migrations, queryable search indexing, historical entry rendering by submitted form version, file metadata persistence, and baseline concurrency/indexing safeguards.
 
+### Current Auth Reality (Important)
+Milestone 2 is now implemented with ASP.NET Core cookie authentication, claims-based current-user mapping, route + policy guards, service-layer authorization checks, invitation create/accept/revoke flow (with anti-abuse protections), and not-authorized UX states for sign-in-required vs access-denied behavior.
+
 ## Roadmap (What’s Next)
 
 ### Milestone 1: Production-Grade Persistence (SQL Server / Azure SQL)
@@ -51,7 +54,7 @@ Milestone 1 is now implemented with EF Core + SQL persistence, migrations, query
   - Add indexes and query patterns for common admin searches
 - Add a “historical render” path: entry detail renders using the exact form version used at submission.
 
-### Milestone 2: Real Auth + Permissions
+### Milestone 2: Real Auth + Permissions (Implemented)
 - Detailed execution checklist: `milestones/Milestone 2.md`
 - Integrate with ASP.NET Core authentication/authorization (host-provided identity).
 - Define and enforce authorization rules for:

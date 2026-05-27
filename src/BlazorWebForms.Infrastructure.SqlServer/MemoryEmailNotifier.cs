@@ -12,4 +12,22 @@ internal sealed class MemoryEmailNotifier : IEmailNotifier
         Messages.Add($"Notify managers for form '{form.Name}' about entry '{entry.Id}'.");
         return Task.CompletedTask;
     }
+
+    public Task NotifyInvitationCreatedAsync(FormAggregate form, FormInvitation invitation, CancellationToken cancellationToken = default)
+    {
+        Messages.Add($"Invitation created for '{invitation.Email}' on form '{form.Name}' with role '{invitation.Role}'. Token '{invitation.Token}'.");
+        return Task.CompletedTask;
+    }
+
+    public Task NotifyInvitationAcceptedAsync(FormAggregate form, FormInvitation invitation, CancellationToken cancellationToken = default)
+    {
+        Messages.Add($"Invitation accepted by '{invitation.Email}' on form '{form.Name}'.");
+        return Task.CompletedTask;
+    }
+
+    public Task NotifyInvitationRevokedAsync(FormAggregate form, FormInvitation invitation, CancellationToken cancellationToken = default)
+    {
+        Messages.Add($"Invitation revoked for '{invitation.Email}' on form '{form.Name}'.");
+        return Task.CompletedTask;
+    }
 }

@@ -26,6 +26,55 @@
     z-index: 20;
 }
 
+.app-top-row-auth {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    justify-content: flex-end;
+}
+
+.app-user-pill {
+    background: #e8f0fe;
+    border: 1px solid #c8dafb;
+    border-radius: 999px;
+    color: #1f3f66;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 0.25rem 0.6rem;
+}
+
+.app-auth-form {
+    align-items: center;
+    display: flex;
+    gap: 0.4rem;
+}
+
+.app-auth-input,
+.app-auth-button {
+    border: 1px solid #c8dafb;
+    border-radius: 0.5rem;
+    font-size: 0.78rem;
+    line-height: 1.2;
+    padding: 0.25rem 0.45rem;
+}
+
+.app-auth-input {
+    background: #fff;
+    color: #1f2c3d;
+}
+
+.app-auth-button {
+    background: #1a73e8;
+    color: #fff;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.app-auth-button:hover {
+    background: #0b57d0;
+}
+
 .app-top-row-title {
     color: #56657a;
     font-size: 0.85rem;

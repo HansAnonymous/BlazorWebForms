@@ -1,5 +1,6 @@
 ﻿@inherits LayoutComponentBase
-
+@inject BlazorWebForms.Core.Abstractions.ICurrentUserContext CurrentUserContext
+@inject NavigationManager Navigation
 <div class="app-shell">
     <aside class="app-sidebar">
         <NavMenu />
@@ -8,7 +9,31 @@
     <main class="app-main">
         <div class="app-top-row">
             <span class="app-top-row-title">BlazorWebForms Sample</span>
-            <a href="https://learn.microsoft.com/aspnet/core/" target="_blank" rel="noopener noreferrer">Docs</a>
+            <div class="app-top-row-auth">
+                <span class="app-user-pill">@UserSummary</span>
+                @if (CurrentUser.IsAuthenticated)
+                {
+                    <form method="post" action="/auth/logout">
+                        <input type="hidden" name="returnUrl" value="@LocalReturnUrl" />
+                        <button type="submit" class="app-auth-button">Log out</button>
+                    </form>
+                }
+                else
+                {
+                    <form method="post" action="/auth/login" class="app-auth-form">
+                        <input type="hidden" name="returnUrl" value="@LocalReturnUrl" />
+                        <input class="app-auth-input" type="text" name="user" value="casey.manager" />
+                        <select class="app-auth-input" name="role">
+                            <option value="Manager">Manager</option>
+                            <option value="Owner">Owner</option>
+                            <option value="Approver">Approver</option>
+                            <option value="Admin">Admin</option>
+                        </select>
+                        <button type="submit" class="app-auth-button">Dev login</button>
+                    </form>
+                }
+                <a href="https://learn.microsoft.com/aspnet/core/" target="_blank" rel="noopener noreferrer">Docs</a>
+            </div>
         </div>
 
         <article class="content">
@@ -16,6 +41,23 @@
         </article>
     </main>
 </div>
+
+@code {
+    private BlazorWebForms.Core.Models.UserProfile CurrentUser => CurrentUserContext.GetCurrentUser();
+
+    private string UserSummary => CurrentUser.IsAuthenticated
+        ? $"{CurrentUser.DisplayName} ({string.Join(", ", CurrentUser.Roles)})"
+        : "Anonymous";
+
+    private string LocalReturnUrl
+    {
+        get
+        {
+            var relative = Navigation.ToBaseRelativePath(Navigation.Uri);
+            return string.IsNullOrWhiteSpace(relative) ? "/" : $"/{relative}";
+        }
+    }
+}
 
 <div id="blazor-error-ui" data-nosnippet>
     An unhandled error has occurred.

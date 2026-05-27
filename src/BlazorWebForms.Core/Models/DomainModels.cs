@@ -37,6 +37,8 @@ public sealed class FormPermissionGrant
     public Guid UserId { get; set; }
     public string DisplayName { get; set; } = string.Empty;
     public FormPermissionRole Role { get; set; }
+    public string ScopeType { get; set; } = "Form";
+    public string? ScopeValue { get; set; }
 }
 
 public sealed class FormNotificationRule
@@ -123,7 +125,25 @@ public sealed class FileUploadRequest
 public sealed class UserProfile
 {
     public Guid UserId { get; set; }
+    public bool IsAuthenticated { get; set; }
     public string DisplayName { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
     public List<FormPermissionRole> Roles { get; set; } = [];
+}
+
+public sealed class FormInvitation
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid FormId { get; set; }
+    public string Email { get; set; } = string.Empty;
+    public FormPermissionRole Role { get; set; }
+    public string ScopeType { get; set; } = "Form";
+    public string? ScopeValue { get; set; }
+    public string Token { get; set; } = string.Empty;
+    public DateTimeOffset ExpiresUtc { get; set; }
+    public InvitationStatus Status { get; set; } = InvitationStatus.Pending;
+    public Guid CreatedByUserId { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public Guid? UpdatedByUserId { get; set; }
+    public DateTimeOffset? UpdatedUtc { get; set; }
 }

@@ -1,0 +1,40 @@
+@page "/not-authorized"
+
+@using Microsoft.AspNetCore.Components.Authorization
+
+@code {
+    [CascadingParameter]
+    public Task<AuthenticationState>? AuthenticationStateTask { get; set; }
+
+    private bool IsAuthenticated { get; set; }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (AuthenticationStateTask is null)
+        {
+            IsAuthenticated = false;
+            return;
+        }
+
+        var state = await AuthenticationStateTask;
+        IsAuthenticated = state.User.Identity?.IsAuthenticated ?? false;
+    }
+}
+
+<PageTitle>Not Authorized</PageTitle>
+
+<section class="bwf-panel">
+    @if (IsAuthenticated)
+    {
+        <p class="bwf-kicker">Access denied</p>
+        <h1>You do not have permission to access this page.</h1>
+        <p class="bwf-help">Sign in with a role that has access (Manager/Owner/Admin for admin and builder routes).</p>
+        <p class="bwf-help">If you expected access, contact the form manager to request the required role.</p>
+    }
+    else
+    {
+        <p class="bwf-kicker">Sign in required</p>
+        <h1>You need to sign in to continue.</h1>
+        <p class="bwf-help">Use the Dev login controls to sign in and retry this page.</p>
+    }
+</section>

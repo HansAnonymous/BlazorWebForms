@@ -19,6 +19,7 @@ public sealed class BlazorWebFormsDbContext : DbContext
     public DbSet<ApprovalStepEntity> ApprovalSteps { get; set; } = null!;
     public DbSet<FormPermissionEntity> FormPermissions { get; set; } = null!;
     public DbSet<FormNotificationEntity> FormNotifications { get; set; } = null!;
+    public DbSet<FormInvitationEntity> FormInvitations { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -97,7 +98,10 @@ public sealed class BlazorWebFormsDbContext : DbContext
         {
             b.ToTable("FormPermissions");
             b.HasKey(x => x.Id);
+            b.Property(x => x.ScopeType).HasMaxLength(32).IsRequired();
+            b.Property(x => x.ScopeValue).HasMaxLength(128);
             b.HasIndex(x => new { x.FormId, x.UserId }).IsUnique();
+            b.HasIndex(x => new { x.FormId, x.ScopeType, x.ScopeValue });
         });
 
         modelBuilder.Entity<FormNotificationEntity>(b =>
@@ -105,6 +109,19 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.ToTable("FormNotifications");
             b.HasKey(x => x.Id);
             b.HasIndex(x => new { x.FormId, x.Email }).IsUnique();
+        });
+
+        modelBuilder.Entity<FormInvitationEntity>(b =>
+        {
+            b.ToTable("FormInvitations");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Email).HasMaxLength(256).IsRequired();
+            b.Property(x => x.ScopeType).HasMaxLength(32).IsRequired();
+            b.Property(x => x.ScopeValue).HasMaxLength(128);
+            b.Property(x => x.Token).HasMaxLength(128).IsRequired();
+            b.HasIndex(x => x.Token).IsUnique();
+            b.HasIndex(x => new { x.FormId, x.Email, x.Status });
+            b.HasOne(x => x.Form).WithMany().HasForeignKey(x => x.FormId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<EntrySearchIndexEntity>(b =>

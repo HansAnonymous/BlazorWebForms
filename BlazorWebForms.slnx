@@ -7,6 +7,9 @@
     <File Path="milestones/Milestone 4.md" />
     <File Path="milestones/Milestone 5.md" />
     <File Path="milestones/Milestone 6.md" />
+    <File Path="PREMISE.md" />
+    <File Path="README.md" />
+    <File Path="ROADMAP.md" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/BlazorWebForms.Blazor/BlazorWebForms.Blazor.csproj" />

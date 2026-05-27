@@ -4,6 +4,7 @@ public sealed class DashboardViewModel
 {
     public required IReadOnlyList<FormAggregate> Forms { get; init; }
     public required IReadOnlyList<EntryRecord> RecentEntries { get; init; }
+    public required UserProfile CurrentUser { get; init; }
 }
 
 public sealed class BuilderState
@@ -63,4 +64,14 @@ public sealed class ApproverInput
 {
     public string Name { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
+}
+
+public sealed class CreateInvitationRequest
+{
+    public Guid FormId { get; set; }
+    public string Email { get; set; } = string.Empty;
+    public FormPermissionRole Role { get; set; }
+    public string ScopeType { get; set; } = "Form";
+    public string? ScopeValue { get; set; }
+    public TimeSpan ValidFor { get; set; } = TimeSpan.FromDays(7);
 }

@@ -42,6 +42,15 @@ else
         </div>
     </section>
 
+    @if (!Dashboard.CurrentUser.IsAuthenticated)
+    {
+        <section class="bwf-panel">
+            <p class="bwf-kicker">Authentication required</p>
+            <h2>Sign in to use builder, admin, and published form routes</h2>
+            <p class="bwf-help">Use the dev login controls in the top-right app bar to sign in with a sample role.</p>
+        </section>
+    }
+
     <section class="bwf-panel">
         <p class="bwf-kicker">Milestone 1 implemented</p>
         <h2>What this sample demonstrates right now</h2>

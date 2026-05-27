@@ -140,7 +140,15 @@ internal sealed class EfFormsRepository : IFormsRepository
                 {
                     UserId = DemoCurrentUserContext.DefaultUserId,
                     DisplayName = "Casey Manager",
-                    Role = FormPermissionRole.Owner
+                    Role = FormPermissionRole.Owner,
+                    ScopeType = "Form"
+                },
+                new FormPermissionGrant
+                {
+                    UserId = Guid.Parse("b7f79ea6-f95f-49e8-b6d7-5c3d6d4c6bf9"),
+                    DisplayName = "Alex Admin",
+                    Role = FormPermissionRole.Admin,
+                    ScopeType = "Global"
                 }
             ],
             Notifications =
@@ -190,7 +198,11 @@ internal sealed class EfFormsRepository : IFormsRepository
                 Id = p.UserId == Guid.Empty ? Guid.NewGuid() : Guid.NewGuid(),
                 UserId = p.UserId,
                 DisplayName = p.DisplayName,
-                Role = (int)p.Role
+                Role = (int)p.Role,
+                ScopeType = string.IsNullOrWhiteSpace(p.ScopeType) ? "Form" : p.ScopeType,
+                ScopeValue = p.ScopeValue,
+                UpdatedByUserId = form.OwnerUserId,
+                UpdatedUtc = DateTimeOffset.UtcNow
             });
         }
 
@@ -291,6 +303,73 @@ internal sealed class EfFormsRepository : IFormsRepository
 
                 CREATE INDEX [IX_EntryFiles_EntryId] ON [EntryFiles] ([EntryId]);
                 CREATE INDEX [IX_EntryFiles_EntryId_FieldId] ON [EntryFiles] ([EntryId], [FieldId]);
+            END;
+
+            IF OBJECT_ID(N'FormPermissions', N'U') IS NOT NULL
+               AND COL_LENGTH(N'FormPermissions', N'ScopeType') IS NULL
+            BEGIN
+                ALTER TABLE [FormPermissions]
+                ADD [ScopeType] NVARCHAR(32) NOT NULL
+                    CONSTRAINT [DF_FormPermissions_ScopeType] DEFAULT N'Form';
+            END;
+
+            IF OBJECT_ID(N'FormPermissions', N'U') IS NOT NULL
+               AND COL_LENGTH(N'FormPermissions', N'ScopeValue') IS NULL
+            BEGIN
+                ALTER TABLE [FormPermissions]
+                ADD [ScopeValue] NVARCHAR(128) NULL;
+            END;
+
+            IF OBJECT_ID(N'FormPermissions', N'U') IS NOT NULL
+               AND COL_LENGTH(N'FormPermissions', N'UpdatedByUserId') IS NULL
+            BEGIN
+                ALTER TABLE [FormPermissions]
+                ADD [UpdatedByUserId] UNIQUEIDENTIFIER NOT NULL
+                    CONSTRAINT [DF_FormPermissions_UpdatedByUserId] DEFAULT ('00000000-0000-0000-0000-000000000000');
+            END;
+
+            IF OBJECT_ID(N'FormPermissions', N'U') IS NOT NULL
+               AND COL_LENGTH(N'FormPermissions', N'UpdatedUtc') IS NULL
+            BEGIN
+                ALTER TABLE [FormPermissions]
+                ADD [UpdatedUtc] DATETIMEOFFSET NOT NULL
+                    CONSTRAINT [DF_FormPermissions_UpdatedUtc] DEFAULT (SYSUTCDATETIME());
+            END;
+
+            IF OBJECT_ID(N'FormPermissions', N'U') IS NOT NULL
+               AND NOT EXISTS (
+                    SELECT 1
+                    FROM sys.indexes
+                    WHERE name = N'IX_FormPermissions_FormId_ScopeType_ScopeValue'
+                      AND object_id = OBJECT_ID(N'FormPermissions', N'U'))
+            BEGIN
+                CREATE INDEX [IX_FormPermissions_FormId_ScopeType_ScopeValue]
+                    ON [FormPermissions] ([FormId], [ScopeType], [ScopeValue]);
+            END;
+
+            IF OBJECT_ID(N'FormInvitations', N'U') IS NULL
+               AND OBJECT_ID(N'Forms', N'U') IS NOT NULL
+            BEGIN
+                CREATE TABLE [FormInvitations] (
+                    [Id] UNIQUEIDENTIFIER NOT NULL,
+                    [FormId] UNIQUEIDENTIFIER NOT NULL,
+                    [Email] NVARCHAR(256) NOT NULL,
+                    [Role] INT NOT NULL,
+                    [ScopeType] NVARCHAR(32) NOT NULL,
+                    [ScopeValue] NVARCHAR(128) NULL,
+                    [Token] NVARCHAR(128) NOT NULL,
+                    [ExpiresUtc] DATETIMEOFFSET NOT NULL,
+                    [Status] INT NOT NULL,
+                    [CreatedByUserId] UNIQUEIDENTIFIER NOT NULL,
+                    [CreatedUtc] DATETIMEOFFSET NOT NULL,
+                    [UpdatedByUserId] UNIQUEIDENTIFIER NULL,
+                    [UpdatedUtc] DATETIMEOFFSET NULL,
+                    CONSTRAINT [PK_FormInvitations] PRIMARY KEY ([Id]),
+                    CONSTRAINT [FK_FormInvitations_Forms_FormId] FOREIGN KEY ([FormId]) REFERENCES [Forms]([Id]) ON DELETE CASCADE
+                );
+
+                CREATE UNIQUE INDEX [IX_FormInvitations_Token] ON [FormInvitations] ([Token]);
+                CREATE INDEX [IX_FormInvitations_FormId_Email_Status] ON [FormInvitations] ([FormId], [Email], [Status]);
             END;
             """,
             cancellationToken);
@@ -400,13 +479,21 @@ internal sealed class EfFormsRepository : IFormsRepository
                     Id = Guid.NewGuid(),
                     UserId = desired.UserId,
                     DisplayName = desired.DisplayName,
-                    Role = (int)desired.Role
+                    Role = (int)desired.Role,
+                    ScopeType = string.IsNullOrWhiteSpace(desired.ScopeType) ? "Form" : desired.ScopeType,
+                    ScopeValue = desired.ScopeValue,
+                    UpdatedByUserId = form.OwnerUserId,
+                    UpdatedUtc = DateTimeOffset.UtcNow
                 });
                 continue;
             }
 
             match.DisplayName = desired.DisplayName;
             match.Role = (int)desired.Role;
+            match.ScopeType = string.IsNullOrWhiteSpace(desired.ScopeType) ? "Form" : desired.ScopeType;
+            match.ScopeValue = desired.ScopeValue;
+            match.UpdatedByUserId = form.OwnerUserId;
+            match.UpdatedUtc = DateTimeOffset.UtcNow;
         }
 
         var desiredNotificationsByEmail = form.Notifications
@@ -668,6 +755,58 @@ internal sealed class EfFormsRepository : IFormsRepository
         await transaction.CommitAsync(cancellationToken);
     }
 
+    public async Task<IReadOnlyList<FormInvitation>> GetInvitationsAsync(Guid formId, CancellationToken cancellationToken = default)
+    {
+        var query = db.FormInvitations.AsNoTracking();
+        if (formId != Guid.Empty)
+        {
+            query = query.Where(i => i.FormId == formId);
+        }
+
+        var invitations = await query.OrderByDescending(i => i.CreatedUtc).ToListAsync(cancellationToken);
+        return invitations.Select(ToInvitation).ToList();
+    }
+
+    public async Task<FormInvitation?> GetInvitationAsync(Guid invitationId, CancellationToken cancellationToken = default)
+    {
+        var invitation = await db.FormInvitations.AsNoTracking().FirstOrDefaultAsync(i => i.Id == invitationId, cancellationToken);
+        return invitation is null ? null : ToInvitation(invitation);
+    }
+
+    public async Task<FormInvitation?> GetInvitationByTokenAsync(string token, CancellationToken cancellationToken = default)
+    {
+        var invitation = await db.FormInvitations.AsNoTracking().FirstOrDefaultAsync(i => i.Token == token, cancellationToken);
+        return invitation is null ? null : ToInvitation(invitation);
+    }
+
+    public async Task SaveInvitationAsync(FormInvitation invitation, CancellationToken cancellationToken = default)
+    {
+        var existing = await db.FormInvitations.FirstOrDefaultAsync(i => i.Id == invitation.Id, cancellationToken);
+        if (existing is null)
+        {
+            existing = new FormInvitationEntity
+            {
+                Id = invitation.Id
+            };
+            db.FormInvitations.Add(existing);
+        }
+
+        existing.FormId = invitation.FormId;
+        existing.Email = invitation.Email;
+        existing.Role = (int)invitation.Role;
+        existing.ScopeType = invitation.ScopeType;
+        existing.ScopeValue = invitation.ScopeValue;
+        existing.Token = invitation.Token;
+        existing.ExpiresUtc = invitation.ExpiresUtc;
+        existing.Status = (int)invitation.Status;
+        existing.CreatedByUserId = invitation.CreatedByUserId;
+        existing.CreatedUtc = invitation.CreatedUtc;
+        existing.UpdatedByUserId = invitation.UpdatedByUserId;
+        existing.UpdatedUtc = invitation.UpdatedUtc;
+
+        await db.SaveChangesAsync(cancellationToken);
+    }
+
     private FormAggregate ToAggregate(FormEntity entity)
     {
         return new FormAggregate
@@ -698,7 +837,9 @@ internal sealed class EfFormsRepository : IFormsRepository
             {
                 UserId = p.UserId,
                 DisplayName = p.DisplayName,
-                Role = (FormPermissionRole)p.Role
+                Role = (FormPermissionRole)p.Role,
+                ScopeType = p.ScopeType,
+                ScopeValue = p.ScopeValue
             }).ToList(),
             Notifications = entity.Notifications.Select(n => new FormNotificationRule
             {
@@ -750,6 +891,26 @@ internal sealed class EfFormsRepository : IFormsRepository
                 Signature = a.Signature,
                 CompletedUtc = a.CompletedUtc
             }).ToList()
+        };
+    }
+
+    private static FormInvitation ToInvitation(FormInvitationEntity entity)
+    {
+        return new FormInvitation
+        {
+            Id = entity.Id,
+            FormId = entity.FormId,
+            Email = entity.Email,
+            Role = (FormPermissionRole)entity.Role,
+            ScopeType = entity.ScopeType,
+            ScopeValue = entity.ScopeValue,
+            Token = entity.Token,
+            ExpiresUtc = entity.ExpiresUtc,
+            Status = (InvitationStatus)entity.Status,
+            CreatedByUserId = entity.CreatedByUserId,
+            CreatedUtc = entity.CreatedUtc,
+            UpdatedByUserId = entity.UpdatedByUserId,
+            UpdatedUtc = entity.UpdatedUtc
         };
     }
 }

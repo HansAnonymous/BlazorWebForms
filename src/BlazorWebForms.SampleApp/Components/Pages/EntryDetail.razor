@@ -1,15 +1,28 @@
 @page "/entries/{EntryId:guid}"
+@attribute [Authorize(Policy = AuthPolicies.SelfViewAccess)]
 @inject FormsApplicationService FormsService
 
 <PageTitle>Entry Detail</PageTitle>
 
-@if (ViewModel is null)
+@if (!IsLoaded)
 {
     <p>Loading entry...</p>
 }
+else if (ViewModel is null)
+{
+    <section class="bwf-panel">
+        <p class="bwf-kicker">Not found</p>
+        <h1>Entry not available.</h1>
+        <p class="bwf-help">The entry was not found, or you do not have permission to view it.</p>
+    </section>
+}
 else if (!ViewModel.CanView)
 {
-    <p>Current user cannot view this entry.</p>
+    <section class="bwf-panel">
+        <p class="bwf-kicker">Access denied</p>
+        <h1>Current user cannot view this entry.</h1>
+        <p class="bwf-help">Only the submitter, assigned viewers, managers, owners, or admins can open this entry.</p>
+    </section>
 }
 else
 {
@@ -79,13 +92,16 @@ else
 @code {
     [Parameter] public Guid EntryId { get; set; }
 
+    private bool IsLoaded { get; set; }
     private EntryDetailViewModel? ViewModel { get; set; }
     private Dictionary<string, string?> ReadOnlyAnswers { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     protected override async Task OnParametersSetAsync()
     {
+        IsLoaded = false;
         ViewModel = await FormsService.GetEntryDetailAsync(EntryId);
         ReadOnlyAnswers.Clear();
+        IsLoaded = true;
 
         if (ViewModel is null)
         {
