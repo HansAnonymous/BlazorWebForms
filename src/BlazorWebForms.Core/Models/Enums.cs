@@ -52,3 +52,17 @@ public enum InvitationStatus
     Revoked,
     Expired
 }
+
+public enum VisibilityJoinOperator
+{
+    And,
+    Or
+}
+
+public enum VisibilityRuleOperator
+{
+    Equals,
+    NotEquals,
+    Contains,
+    Empty
+}

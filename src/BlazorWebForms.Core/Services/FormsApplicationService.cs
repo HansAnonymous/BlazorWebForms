@@ -1,5 +1,6 @@
 using BlazorWebForms.Core.Abstractions;
 using BlazorWebForms.Core.Models;
+using System.Text.RegularExpressions;
 
 namespace BlazorWebForms.Core.Services;
 
@@ -101,6 +102,8 @@ public sealed class FormsApplicationService(
         {
             throw new InvalidOperationException("Current user cannot publish this form.");
         }
+
+        ValidateDefinitionForPublish(form.DraftDefinition);
 
         var nextVersion = form.Versions.Count == 0 ? 1 : form.Versions.Max(v => v.VersionNumber) + 1;
         var version = new FormVersionRecord
@@ -501,5 +504,138 @@ public sealed class FormsApplicationService(
         form.Publication.Slug = form.Key;
         form.DraftDefinition = DemoFormFactory.CreateDefaultDefinition();
         return form;
+    }
+
+    private static void ValidateDefinitionForPublish(FormDefinition definition)
+    {
+        if (definition.SchemaVersion <= 0 || definition.SchemaVersion > FormDefinition.CurrentSchemaVersion)
+        {
+            throw new InvalidOperationException("Draft definition schema version is invalid for publish.");
+        }
+
+        if (definition.Sections.Count == 0)
+        {
+            throw new InvalidOperationException("At least one section is required before publish.");
+        }
+
+        var sectionIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var fieldIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var section in definition.Sections)
+        {
+            if (string.IsNullOrWhiteSpace(section.Id))
+            {
+                throw new InvalidOperationException("Section id is required.");
+            }
+
+            if (!sectionIds.Add(section.Id))
+            {
+                throw new InvalidOperationException($"Duplicate section id '{section.Id}' found.");
+            }
+
+            if (section.Fields.Count == 0)
+            {
+                throw new InvalidOperationException($"Section '{section.Title}' must include at least one field.");
+            }
+
+            foreach (var field in section.Fields)
+            {
+                if (string.IsNullOrWhiteSpace(field.Id))
+                {
+                    throw new InvalidOperationException("Field id is required.");
+                }
+
+                if (!fieldIds.Add(field.Id))
+                {
+                    throw new InvalidOperationException($"Duplicate field id '{field.Id}' found.");
+                }
+
+                if (!string.IsNullOrWhiteSpace(field.RegexPattern))
+                {
+                    try
+                    {
+                        _ = new Regex(field.RegexPattern);
+                    }
+                    catch (ArgumentException)
+                    {
+                        throw new InvalidOperationException($"Field '{field.Label}' has an invalid regex pattern.");
+                    }
+                }
+
+                if (field.Kind is FormFieldKind.Select or FormFieldKind.Radio)
+                {
+                    if (field.Options.Count == 0)
+                    {
+                        throw new InvalidOperationException($"Field '{field.Label}' must define at least one option.");
+                    }
+
+                    var optionValues = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var option in field.Options)
+                    {
+                        if (string.IsNullOrWhiteSpace(option.Value))
+                        {
+                            throw new InvalidOperationException($"Field '{field.Label}' includes an option with empty value.");
+                        }
+
+                        if (!optionValues.Add(option.Value))
+                        {
+                            throw new InvalidOperationException($"Field '{field.Label}' contains duplicate option values.");
+                        }
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(field.DefaultValue) && !optionValues.Contains(field.DefaultValue))
+                    {
+                        throw new InvalidOperationException($"Field '{field.Label}' default value must match an option value.");
+                    }
+                }
+            }
+        }
+
+        foreach (var section in definition.Sections)
+        {
+            foreach (var sectionRef in GetConditionReferences(section.VisibilityCondition, section.VisibilityRules))
+            {
+                if (!fieldIds.Contains(sectionRef))
+                {
+                    throw new InvalidOperationException($"Section '{section.Title}' visibility condition references unknown field '{sectionRef}'.");
+                }
+            }
+
+            foreach (var field in section.Fields)
+            {
+                foreach (var fieldRef in GetConditionReferences(field.VisibilityCondition, field.VisibilityRules))
+                {
+                    if (!fieldIds.Contains(fieldRef))
+                    {
+                        throw new InvalidOperationException($"Field '{field.Label}' visibility condition references unknown field '{fieldRef}'.");
+                    }
+                }
+            }
+        }
+    }
+
+    private static IEnumerable<string> GetConditionReferences(string? condition, VisibilityConditionDefinition? rules)
+    {
+        if (rules is not null)
+        {
+            foreach (var rule in rules.Rules)
+            {
+                if (!string.IsNullOrWhiteSpace(rule.FieldId))
+                {
+                    yield return rule.FieldId;
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(condition))
+        {
+            yield break;
+        }
+
+        var parts = condition.Split('=', 2, StringSplitOptions.TrimEntries);
+        if (parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[0]))
+        {
+            yield return parts[0];
+        }
     }
 }

@@ -11,6 +11,7 @@ public interface IFormDefinitionSerializer
 public interface IConditionEvaluator
 {
     bool IsVisible(string? expression, IReadOnlyDictionary<string, string?> answers);
+    bool IsVisible(VisibilityConditionDefinition? condition, IReadOnlyDictionary<string, string?> answers);
 }
 
 public interface IFieldComponentRegistry

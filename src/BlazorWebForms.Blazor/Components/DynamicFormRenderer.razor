@@ -4,7 +4,7 @@
 @inject IConditionEvaluator ConditionEvaluator
 
 <div class="bwf-form">
-    @foreach (var formSection in Definition.Sections.Where(section => ConditionEvaluator.IsVisible(section.VisibilityCondition, Answers)))
+    @foreach (var formSection in Definition.Sections.Where(IsSectionVisible))
     {
         <section class="bwf-section">
             <header class="bwf-section-header">
@@ -15,7 +15,7 @@
                 }
             </header>
 
-            @foreach (var field in formSection.Fields.Where(field => ConditionEvaluator.IsVisible(field.VisibilityCondition, Answers)))
+            @foreach (var field in formSection.Fields.Where(IsFieldVisible))
             {
                 <div class="bwf-field">
                     <label class="bwf-label" for="@field.Id">@field.Label @(field.Required ? "*" : string.Empty)</label>
@@ -163,5 +163,25 @@
         await FilesChanged.InvokeAsync(uploadedFilesByField.Values.ToList());
         Answers[fieldId] = stored.FileName;
         await AnswersChanged.InvokeAsync(Answers);
+    }
+
+    private bool IsSectionVisible(FormSectionDefinition section)
+    {
+        if (section.VisibilityRules is not null && section.VisibilityRules.Rules.Count > 0)
+        {
+            return ConditionEvaluator.IsVisible(section.VisibilityRules, Answers);
+        }
+
+        return ConditionEvaluator.IsVisible(section.VisibilityCondition, Answers);
+    }
+
+    private bool IsFieldVisible(FormFieldDefinition field)
+    {
+        if (field.VisibilityRules is not null && field.VisibilityRules.Rules.Count > 0)
+        {
+            return ConditionEvaluator.IsVisible(field.VisibilityRules, Answers);
+        }
+
+        return ConditionEvaluator.IsVisible(field.VisibilityCondition, Answers);
     }
 }

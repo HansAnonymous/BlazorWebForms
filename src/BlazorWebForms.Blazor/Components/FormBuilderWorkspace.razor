@@ -42,19 +42,51 @@ else
 
             <section class="bwf-panel">
                 <h3>Sections</h3>
-                @foreach (var section in State.Form.DraftDefinition.Sections)
+                @for (var sectionIndex = 0; sectionIndex < State.Form.DraftDefinition.Sections.Count; sectionIndex++)
                 {
+                    var section = State.Form.DraftDefinition.Sections[sectionIndex];
                     <article class="bwf-section-card">
                         <input class="bwf-input" @bind="section.Title" />
                         <textarea class="bwf-textarea" rows="2" @bind="section.Description"></textarea>
+                        <label>
+                            <span>Section visibility condition</span>
+                            <input class="bwf-input" @bind="section.VisibilityCondition" placeholder="fieldId=value" />
+                        </label>
+                        <div class="bwf-grid">
+                            <label>
+                                <span>Section rules join</span>
+                                <select class="bwf-input" value="@GetSectionRulesJoin(section)" @onchange="e => SetSectionRulesJoin(section, e.Value?.ToString())">
+                                    <option value="@VisibilityJoinOperator.And">And</option>
+                                    <option value="@VisibilityJoinOperator.Or">Or</option>
+                                </select>
+                            </label>
+                            <label>
+                                <span>Section visibility rules (fieldId|operator|value)</span>
+                                <textarea class="bwf-textarea" rows="3" value="@GetRulesText(GetOrCreateRules(section))" @onchange="e => SetRulesText(section, e.Value?.ToString())"></textarea>
+                            </label>
+                        </div>
                         <div class="bwf-actions">
                             <button class="bwf-button" @onclick="() => AddField(section, FormFieldKind.Text)">Text</button>
                             <button class="bwf-button" @onclick="() => AddField(section, FormFieldKind.TextArea)">Textarea</button>
                             <button class="bwf-button" @onclick="() => AddField(section, FormFieldKind.Select)">Select</button>
                             <button class="bwf-button" @onclick="() => AddField(section, FormFieldKind.Signature)">Signature</button>
+                            <button class="bwf-button" @onclick="() => MoveSection(sectionIndex, -1)" disabled="@(sectionIndex == 0)">Move up</button>
+                            <button class="bwf-button" @onclick="() => MoveSection(sectionIndex, 1)" disabled="@(sectionIndex == State.Form.DraftDefinition.Sections.Count - 1)">Move down</button>
+                            <button class="bwf-button" @onclick="() => RequestDeleteSection(section)">Delete section</button>
                         </div>
-                        @foreach (var field in section.Fields)
+
+                        @if (PendingSectionDeleteId == section.Id)
                         {
+                            <div class="bwf-help">
+                                Confirm section delete?
+                                <button class="bwf-button" @onclick="() => ConfirmDeleteSection(section)">Confirm</button>
+                                <button class="bwf-button" @onclick="CancelDeleteSection">Cancel</button>
+                            </div>
+                        }
+
+                        @for (var fieldIndex = 0; fieldIndex < section.Fields.Count; fieldIndex++)
+                        {
+                            var field = section.Fields[fieldIndex];
                             <div class="bwf-field-row">
                                 <input class="bwf-input" @bind="field.Label" />
                                 <select class="bwf-input" @bind="field.Kind">
@@ -71,7 +103,70 @@ else
                                     <input type="checkbox" @bind="field.Searchable" />
                                     <span>Search</span>
                                 </label>
+
+                                <button class="bwf-button" @onclick="() => MoveField(section, fieldIndex, -1)" disabled="@(fieldIndex == 0)">Up</button>
+                                <button class="bwf-button" @onclick="() => MoveField(section, fieldIndex, 1)" disabled="@(fieldIndex == section.Fields.Count - 1)">Down</button>
+                                <button class="bwf-button" @onclick="() => RequestDeleteField(field)">Delete</button>
                             </div>
+
+                            <div class="bwf-grid">
+                                <label>
+                                    <span>Field id</span>
+                                    <input class="bwf-input" @bind="field.Id" />
+                                </label>
+                                <label>
+                                    <span>Placeholder</span>
+                                    <input class="bwf-input" @bind="field.Placeholder" />
+                                </label>
+                                <label>
+                                    <span>Help text</span>
+                                    <input class="bwf-input" @bind="field.HelpText" />
+                                </label>
+                                <label>
+                                    <span>Regex pattern</span>
+                                    <input class="bwf-input" @bind="field.RegexPattern" placeholder="^[A-Za-z ]+$" />
+                                </label>
+                                <label>
+                                    <span>Default value</span>
+                                    <input class="bwf-input" @bind="field.DefaultValue" />
+                                </label>
+                                <label>
+                                    <span>Validation hint</span>
+                                    <input class="bwf-input" @bind="field.ValidationHint" />
+                                </label>
+                                <label>
+                                    <span>Visibility condition</span>
+                                    <input class="bwf-input" @bind="field.VisibilityCondition" placeholder="fieldId=value" />
+                                </label>
+                                <label>
+                                    <span>Visibility rules join</span>
+                                    <select class="bwf-input" value="@GetFieldRulesJoin(field)" @onchange="e => SetFieldRulesJoin(field, e.Value?.ToString())">
+                                        <option value="@VisibilityJoinOperator.And">And</option>
+                                        <option value="@VisibilityJoinOperator.Or">Or</option>
+                                    </select>
+                                </label>
+                                <label>
+                                    <span>Visibility rules (fieldId|operator|value)</span>
+                                    <textarea class="bwf-textarea" rows="3" value="@GetRulesText(GetOrCreateRules(field))" @onchange="e => SetRulesText(field, e.Value?.ToString())"></textarea>
+                                </label>
+                            </div>
+
+                            @if (field.Kind is FormFieldKind.Select or FormFieldKind.Radio)
+                            {
+                                <label>
+                                    <span>Options (one per line: value|label)</span>
+                                    <textarea class="bwf-textarea" rows="4" value="@GetOptionsText(field)" @onchange="e => SetOptionsText(field, e.Value?.ToString())"></textarea>
+                                </label>
+                            }
+
+                            @if (PendingFieldDeleteId == field.Id)
+                            {
+                                <div class="bwf-help">
+                                    Confirm field delete?
+                                    <button class="bwf-button" @onclick="() => ConfirmDeleteField(section, field)">Confirm</button>
+                                    <button class="bwf-button" @onclick="CancelDeleteField">Cancel</button>
+                                </div>
+                            }
                         }
                     </article>
                 }
@@ -95,6 +190,8 @@ else
 
     private BuilderState? State { get; set; }
     private string StatusMessage { get; set; } = string.Empty;
+    private string? PendingSectionDeleteId { get; set; }
+    private string? PendingFieldDeleteId { get; set; }
     private Dictionary<string, string?> PreviewAnswers { get; } = new(StringComparer.OrdinalIgnoreCase);
 
     protected override async Task OnParametersSetAsync()
@@ -109,6 +206,317 @@ else
             Title = "New section",
             Description = "Describe this section."
         });
+    }
+
+    private void MoveSection(int index, int delta)
+    {
+        if (State is null)
+        {
+            return;
+        }
+
+        var target = index + delta;
+        if (target < 0 || target >= State.Form.DraftDefinition.Sections.Count)
+        {
+            return;
+        }
+
+        var section = State.Form.DraftDefinition.Sections[index];
+        State.Form.DraftDefinition.Sections.RemoveAt(index);
+        State.Form.DraftDefinition.Sections.Insert(target, section);
+    }
+
+    private void MoveField(FormSectionDefinition section, int index, int delta)
+    {
+        var target = index + delta;
+        if (target < 0 || target >= section.Fields.Count)
+        {
+            return;
+        }
+
+        var field = section.Fields[index];
+        section.Fields.RemoveAt(index);
+        section.Fields.Insert(target, field);
+    }
+
+    private void RequestDeleteSection(FormSectionDefinition section)
+    {
+        if (State is null)
+        {
+            return;
+        }
+
+        var sectionFieldIds = section.Fields.Select(f => f.Id).Where(id => !string.IsNullOrWhiteSpace(id)).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var dependencies = new List<string>();
+
+        foreach (var candidateSection in State.Form.DraftDefinition.Sections)
+        {
+            var sectionRefs = GetConditionReferences(candidateSection.VisibilityCondition, candidateSection.VisibilityRules).ToList();
+            if (sectionRefs.Any(sectionFieldIds.Contains) && candidateSection.Id != section.Id)
+            {
+                dependencies.Add($"Section '{candidateSection.Title}' visibility");
+            }
+
+            foreach (var candidateField in candidateSection.Fields)
+            {
+                var fieldRefs = GetConditionReferences(candidateField.VisibilityCondition, candidateField.VisibilityRules).ToList();
+                if (fieldRefs.Any(sectionFieldIds.Contains) && !section.Fields.Any(f => f.Id == candidateField.Id))
+                {
+                    dependencies.Add($"Field '{candidateField.Label}' visibility");
+                }
+            }
+        }
+
+        if (dependencies.Count > 0)
+        {
+            StatusMessage = $"Cannot delete section '{section.Title}'. Remove dependencies first: {string.Join(", ", dependencies.Distinct())}.";
+            PendingSectionDeleteId = null;
+            return;
+        }
+
+        PendingSectionDeleteId = section.Id;
+        StatusMessage = string.Empty;
+    }
+
+    private void ConfirmDeleteSection(FormSectionDefinition section)
+    {
+        if (State is null)
+        {
+            return;
+        }
+
+        State.Form.DraftDefinition.Sections.Remove(section);
+        PendingSectionDeleteId = null;
+    }
+
+    private void CancelDeleteSection() => PendingSectionDeleteId = null;
+
+    private void RequestDeleteField(FormFieldDefinition field)
+    {
+        if (State is null)
+        {
+            return;
+        }
+
+        var dependencies = new List<string>();
+        foreach (var section in State.Form.DraftDefinition.Sections)
+        {
+            var sectionRefs = GetConditionReferences(section.VisibilityCondition, section.VisibilityRules).ToList();
+            if (sectionRefs.Any(r => r.Equals(field.Id, StringComparison.OrdinalIgnoreCase)))
+            {
+                dependencies.Add($"Section '{section.Title}' visibility");
+            }
+
+            foreach (var candidateField in section.Fields)
+            {
+                if (candidateField.Id.Equals(field.Id, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                var fieldRefs = GetConditionReferences(candidateField.VisibilityCondition, candidateField.VisibilityRules).ToList();
+                if (fieldRefs.Any(r => r.Equals(field.Id, StringComparison.OrdinalIgnoreCase)))
+                {
+                    dependencies.Add($"Field '{candidateField.Label}' visibility");
+                }
+            }
+        }
+
+        if (dependencies.Count > 0)
+        {
+            StatusMessage = $"Cannot delete field '{field.Label}'. Remove dependencies first: {string.Join(", ", dependencies.Distinct())}.";
+            PendingFieldDeleteId = null;
+            return;
+        }
+
+        PendingFieldDeleteId = field.Id;
+        StatusMessage = string.Empty;
+    }
+
+    private void ConfirmDeleteField(FormSectionDefinition section, FormFieldDefinition field)
+    {
+        section.Fields.Remove(field);
+        PendingFieldDeleteId = null;
+    }
+
+    private void CancelDeleteField() => PendingFieldDeleteId = null;
+
+    private static string GetOptionsText(FormFieldDefinition field)
+    {
+        return string.Join(Environment.NewLine, field.Options.Select(o => $"{o.Value}|{o.Label}"));
+    }
+
+    private static void SetOptionsText(FormFieldDefinition field, string? value)
+    {
+        field.Options.Clear();
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var lines = value.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var line in lines)
+        {
+            var parts = line.Split('|', 2, StringSplitOptions.TrimEntries);
+            var optionValue = parts[0];
+            if (string.IsNullOrWhiteSpace(optionValue))
+            {
+                continue;
+            }
+
+            var optionLabel = parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[1])
+                ? parts[1]
+                : optionValue;
+
+            field.Options.Add(new FormFieldOption
+            {
+                Value = optionValue,
+                Label = optionLabel
+            });
+        }
+    }
+
+    private static IEnumerable<string> GetConditionReferences(string? condition, VisibilityConditionDefinition? rules)
+    {
+        if (rules is not null)
+        {
+            foreach (var rule in rules.Rules)
+            {
+                if (!string.IsNullOrWhiteSpace(rule.FieldId))
+                {
+                    yield return rule.FieldId;
+                }
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(condition))
+        {
+            yield break;
+        }
+
+        var parts = condition.Split('=', 2, StringSplitOptions.TrimEntries);
+        if (parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[0]))
+        {
+            yield return parts[0];
+        }
+    }
+
+    private static string GetRulesText(VisibilityConditionDefinition rules)
+    {
+        return string.Join(Environment.NewLine, rules.Rules.Select(r => $"{r.FieldId}|{ToOperatorToken(r.Operator)}|{r.Value}"));
+    }
+
+    private static void SetRulesText(FormSectionDefinition section, string? value)
+    {
+        section.VisibilityRules = ParseRules(GetOrCreateRules(section), value);
+    }
+
+    private static void SetRulesText(FormFieldDefinition field, string? value)
+    {
+        field.VisibilityRules = ParseRules(GetOrCreateRules(field), value);
+    }
+
+    private static string GetSectionRulesJoin(FormSectionDefinition section) => GetOrCreateRules(section).Join.ToString();
+
+    private static string GetFieldRulesJoin(FormFieldDefinition field) => GetOrCreateRules(field).Join.ToString();
+
+    private static void SetSectionRulesJoin(FormSectionDefinition section, string? value)
+    {
+        if (Enum.TryParse<VisibilityJoinOperator>(value, true, out var join))
+        {
+            GetOrCreateRules(section).Join = join;
+        }
+    }
+
+    private static void SetFieldRulesJoin(FormFieldDefinition field, string? value)
+    {
+        if (Enum.TryParse<VisibilityJoinOperator>(value, true, out var join))
+        {
+            GetOrCreateRules(field).Join = join;
+        }
+    }
+
+    private static VisibilityConditionDefinition GetOrCreateRules(FormSectionDefinition section)
+    {
+        section.VisibilityRules ??= new VisibilityConditionDefinition();
+        return section.VisibilityRules;
+    }
+
+    private static VisibilityConditionDefinition GetOrCreateRules(FormFieldDefinition field)
+    {
+        field.VisibilityRules ??= new VisibilityConditionDefinition();
+        return field.VisibilityRules;
+    }
+
+    private static VisibilityConditionDefinition ParseRules(VisibilityConditionDefinition rules, string? value)
+    {
+        rules.Rules.Clear();
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return rules;
+        }
+
+        var lines = value.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var line in lines)
+        {
+            var parts = line.Split('|', 3, StringSplitOptions.TrimEntries);
+            if (parts.Length < 2 || string.IsNullOrWhiteSpace(parts[0]))
+            {
+                continue;
+            }
+
+            if (!TryParseOperator(parts[1], out var op))
+            {
+                continue;
+            }
+
+            rules.Rules.Add(new VisibilityRuleDefinition
+            {
+                FieldId = parts[0],
+                Operator = op,
+                Value = parts.Length == 3 ? parts[2] : null
+            });
+        }
+
+        return rules;
+    }
+
+    private static bool TryParseOperator(string token, out VisibilityRuleOperator op)
+    {
+        switch (token.Trim().ToLowerInvariant())
+        {
+            case "eq":
+            case "equals":
+                op = VisibilityRuleOperator.Equals;
+                return true;
+            case "neq":
+            case "notequals":
+                op = VisibilityRuleOperator.NotEquals;
+                return true;
+            case "contains":
+                op = VisibilityRuleOperator.Contains;
+                return true;
+            case "empty":
+                op = VisibilityRuleOperator.Empty;
+                return true;
+            default:
+                op = VisibilityRuleOperator.Equals;
+                return false;
+        }
+    }
+
+    private static string ToOperatorToken(VisibilityRuleOperator op)
+    {
+        return op switch
+        {
+            VisibilityRuleOperator.Equals => "equals",
+            VisibilityRuleOperator.NotEquals => "notEquals",
+            VisibilityRuleOperator.Contains => "contains",
+            VisibilityRuleOperator.Empty => "empty",
+            _ => "equals"
+        };
     }
 
     private static void AddField(FormSectionDefinition section, FormFieldKind kind)
