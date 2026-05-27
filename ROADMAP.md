@@ -33,7 +33,7 @@ This repository currently contains a working V1 scaffold: domain model + service
 - `/entries/{entryId}` view entry detail
 
 ### Current Storage Reality (Important)
-The infrastructure project includes a SQL Server schema creation script, but the running sample app currently uses an in-memory repository to keep the scaffold runnable without external dependencies. Moving to EF Core + real SQL persistence is a primary next milestone.
+Milestone 1 is now implemented with EF Core + SQL persistence, migrations, queryable search indexing, historical entry rendering by submitted form version, file metadata persistence, and baseline concurrency/indexing safeguards.
 
 ## Roadmap (What’s Next)
 
@@ -99,7 +99,6 @@ The infrastructure project includes a SQL Server schema creation script, but the
 - Add an optional MudBlazor adapter package (keep core UI dependency-light).
 
 ## Non-Goals (In the Current Scaffold)
-- Full EF Core persistence is not implemented yet.
 - External e-signature compliance workflows are not implemented (current “signature” is simple capture).
 - Multitenant custom domain provisioning automation is not implemented (domain is metadata today).
 - Full-text search across all fields/files is not implemented (current strategy is “searchable fields” index).

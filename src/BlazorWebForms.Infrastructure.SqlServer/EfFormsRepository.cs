@@ -57,6 +57,8 @@ internal sealed class EfFormsRepository : IFormsRepository
             }
         }
 
+        await EnsureLegacySchemaCompatibilityAsync(cancellationToken);
+
         if (await db.Forms.AnyAsync(cancellationToken))
         {
             // if forms exist but no entries, seed demo entry to ensure demo data present
@@ -255,6 +257,45 @@ internal sealed class EfFormsRepository : IFormsRepository
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    private Task EnsureLegacySchemaCompatibilityAsync(CancellationToken cancellationToken)
+    {
+        return db.Database.ExecuteSqlRawAsync(
+            """
+            IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Forms', N'RowVersion') IS NULL
+            BEGIN
+                ALTER TABLE [Forms] ADD [RowVersion] ROWVERSION NOT NULL;
+            END;
+
+            IF OBJECT_ID(N'Entries', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Entries', N'RowVersion') IS NULL
+            BEGIN
+                ALTER TABLE [Entries] ADD [RowVersion] ROWVERSION NOT NULL;
+            END;
+
+            IF OBJECT_ID(N'EntryFiles', N'U') IS NULL
+               AND OBJECT_ID(N'Entries', N'U') IS NOT NULL
+            BEGIN
+                CREATE TABLE [EntryFiles] (
+                    [Id] UNIQUEIDENTIFIER NOT NULL,
+                    [EntryId] UNIQUEIDENTIFIER NOT NULL,
+                    [FieldId] NVARCHAR(128) NOT NULL,
+                    [FileName] NVARCHAR(260) NOT NULL,
+                    [ContentType] NVARCHAR(128) NOT NULL,
+                    [Length] BIGINT NOT NULL,
+                    [RelativePath] NVARCHAR(512) NOT NULL,
+                    [UploadedUtc] DATETIMEOFFSET NOT NULL,
+                    CONSTRAINT [PK_EntryFiles] PRIMARY KEY ([Id]),
+                    CONSTRAINT [FK_EntryFiles_Entries_EntryId] FOREIGN KEY ([EntryId]) REFERENCES [Entries]([Id]) ON DELETE CASCADE
+                );
+
+                CREATE INDEX [IX_EntryFiles_EntryId] ON [EntryFiles] ([EntryId]);
+                CREATE INDEX [IX_EntryFiles_EntryId_FieldId] ON [EntryFiles] ([EntryId], [FieldId]);
+            END;
+            """,
+            cancellationToken);
+    }
+
     public async Task<IReadOnlyList<FormAggregate>> GetFormsAsync(CancellationToken cancellationToken = default)
     {
         var entities = await db.Forms
@@ -291,6 +332,7 @@ internal sealed class EfFormsRepository : IFormsRepository
 
     public async Task SaveFormAsync(FormAggregate form, CancellationToken cancellationToken = default)
     {
+        db.ChangeTracker.Clear();
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
         var existing = await db.Forms
@@ -316,44 +358,89 @@ internal sealed class EfFormsRepository : IFormsRepository
         existing.PublicationAccessMode = (int)form.Publication.AccessMode;
         existing.PublicationSendSubmissionCopyToSubmitter = form.Publication.SendSubmissionCopyToSubmitter;
 
-        // replace child collections: versions, permissions, notifications
-        db.RemoveRange(existing.Versions);
-        existing.Versions.Clear();
+        // Form versions are immutable snapshots; append new ones only.
+        var existingVersionIds = existing.Versions.Select(v => v.Id).ToHashSet();
         foreach (var v in form.Versions)
         {
-            existing.Versions.Add(new FormVersionEntity
+            if (existingVersionIds.Contains(v.Id))
+            {
+                continue;
+            }
+
+            db.FormVersions.Add(new FormVersionEntity
             {
                 Id = v.Id,
+                FormId = existing.Id,
                 VersionNumber = v.VersionNumber,
                 CreatedUtc = v.CreatedUtc,
                 DefinitionJson = v.DefinitionJson
             });
         }
 
-        db.RemoveRange(existing.Permissions);
-        existing.Permissions.Clear();
-        foreach (var p in form.Permissions)
+        var desiredPermissionsByUserId = form.Permissions
+            .Where(p => p.UserId != Guid.Empty)
+            .GroupBy(p => p.UserId)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        foreach (var existingPermission in existing.Permissions.ToList())
         {
-            existing.Permissions.Add(new FormPermissionEntity
+            if (!desiredPermissionsByUserId.ContainsKey(existingPermission.UserId))
             {
-                Id = Guid.NewGuid(),
-                UserId = p.UserId,
-                DisplayName = p.DisplayName,
-                Role = (int)p.Role
-            });
+                db.FormPermissions.Remove(existingPermission);
+            }
         }
 
-        db.RemoveRange(existing.Notifications);
-        existing.Notifications.Clear();
-        foreach (var n in form.Notifications)
+        foreach (var desired in desiredPermissionsByUserId.Values)
         {
-            existing.Notifications.Add(new FormNotificationEntity
+            var match = existing.Permissions.FirstOrDefault(p => p.UserId == desired.UserId);
+            if (match is null)
             {
-                Id = Guid.NewGuid(),
-                Email = n.Email,
-                OnSubmission = n.OnSubmission,
-                OnApproval = n.OnApproval
-            });
+                existing.Permissions.Add(new FormPermissionEntity
+                {
+                    Id = Guid.NewGuid(),
+                    UserId = desired.UserId,
+                    DisplayName = desired.DisplayName,
+                    Role = (int)desired.Role
+                });
+                continue;
+            }
+
+            match.DisplayName = desired.DisplayName;
+            match.Role = (int)desired.Role;
+        }
+
+        var desiredNotificationsByEmail = form.Notifications
+            .Where(n => !string.IsNullOrWhiteSpace(n.Email))
+            .GroupBy(n => n.Email.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+        foreach (var existingNotification in existing.Notifications.ToList())
+        {
+            if (!desiredNotificationsByEmail.ContainsKey(existingNotification.Email))
+            {
+                db.FormNotifications.Remove(existingNotification);
+            }
+        }
+
+        foreach (var desired in desiredNotificationsByEmail.Values)
+        {
+            var match = existing.Notifications.FirstOrDefault(n =>
+                string.Equals(n.Email, desired.Email, StringComparison.OrdinalIgnoreCase));
+
+            if (match is null)
+            {
+                existing.Notifications.Add(new FormNotificationEntity
+                {
+                    Id = Guid.NewGuid(),
+                    Email = desired.Email.Trim(),
+                    OnSubmission = desired.OnSubmission,
+                    OnApproval = desired.OnApproval
+                });
+                continue;
+            }
+
+            match.OnSubmission = desired.OnSubmission;
+            match.OnApproval = desired.OnApproval;
         }
 
         try
@@ -370,6 +457,15 @@ internal sealed class EfFormsRepository : IFormsRepository
 
     public async Task<IReadOnlyList<EntryRecord>> GetEntriesAsync(Guid? formId, string? search, CancellationToken cancellationToken = default)
     {
+        return await QueryEntriesAsync(new EntryQueryOptions
+        {
+            FormId = formId,
+            Search = search
+        }, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<EntryRecord>> QueryEntriesAsync(EntryQueryOptions options, CancellationToken cancellationToken = default)
+    {
         var q = db.Entries
             .Include(e => e.Revisions)
             .Include(e => e.ApprovalSteps)
@@ -377,12 +473,28 @@ internal sealed class EfFormsRepository : IFormsRepository
             .Include(e => e.SearchIndexEntries)
             .AsNoTracking();
 
-        if (formId.HasValue)
-            q = q.Where(e => e.FormId == formId.Value);
+        if (options.FormId.HasValue)
+            q = q.Where(e => e.FormId == options.FormId.Value);
 
-        if (!string.IsNullOrWhiteSpace(search))
+        if (options.Status.HasValue)
+            q = q.Where(e => e.Status == (int)options.Status.Value);
+
+        if (options.SubmittedFromUtc.HasValue)
+            q = q.Where(e => e.SubmittedUtc >= options.SubmittedFromUtc.Value);
+
+        if (options.SubmittedToUtc.HasValue)
+            q = q.Where(e => e.SubmittedUtc <= options.SubmittedToUtc.Value);
+
+        if (!string.IsNullOrWhiteSpace(options.IndexedFieldId) && !string.IsNullOrWhiteSpace(options.IndexedFieldValue))
         {
-            var searchTerm = search.Trim();
+            var indexedFieldId = options.IndexedFieldId.Trim();
+            var indexedFieldValue = options.IndexedFieldValue.Trim();
+            q = q.Where(e => e.SearchIndexEntries.Any(s => s.Key == indexedFieldId && s.Value.Contains(indexedFieldValue)));
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Search))
+        {
+            var searchTerm = options.Search.Trim();
             q = q.Where(e =>
                 e.SubmittedBy.Contains(searchTerm) ||
                 e.SearchIndexEntries.Any(s => s.Value.Contains(searchTerm)));
@@ -407,6 +519,7 @@ internal sealed class EfFormsRepository : IFormsRepository
 
     public async Task SaveEntryAsync(EntryRecord entry, CancellationToken cancellationToken = default)
     {
+        db.ChangeTracker.Clear();
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
         var existing = await db.Entries
@@ -431,13 +544,18 @@ internal sealed class EfFormsRepository : IFormsRepository
         existing.Answers = new Dictionary<string, string?>(entry.Answers, StringComparer.OrdinalIgnoreCase);
         existing.SearchIndex = new Dictionary<string, string>(entry.SearchIndex, StringComparer.OrdinalIgnoreCase);
 
-        db.RemoveRange(existing.Revisions);
-        existing.Revisions.Clear();
+        var existingRevisionIds = existing.Revisions.Select(r => r.Id).ToHashSet();
         foreach (var r in entry.Revisions)
         {
-            existing.Revisions.Add(new EntryRevisionEntity
+            if (existingRevisionIds.Contains(r.Id))
+            {
+                continue;
+            }
+
+            db.EntryRevisions.Add(new EntryRevisionEntity
             {
                 Id = r.Id,
+                EntryId = existing.Id,
                 RevisionNumber = r.RevisionNumber,
                 EditedBy = r.EditedBy,
                 EditedUtc = r.EditedUtc,
@@ -445,27 +563,49 @@ internal sealed class EfFormsRepository : IFormsRepository
             });
         }
 
-        db.RemoveRange(existing.ApprovalSteps);
-        existing.ApprovalSteps.Clear();
+        var approvalStepsById = existing.ApprovalSteps.ToDictionary(a => a.Id);
         foreach (var a in entry.ApprovalSteps)
         {
-            existing.ApprovalSteps.Add(new ApprovalStepEntity
+            if (!approvalStepsById.TryGetValue(a.Id, out var existingStep))
             {
-                Id = a.Id,
-                Order = a.Order,
-                ApproverName = a.ApproverName,
-                ApproverEmail = a.ApproverEmail,
-                Status = (int)a.Status,
-                Signature = a.Signature,
-                CompletedUtc = a.CompletedUtc
-            });
+                existing.ApprovalSteps.Add(new ApprovalStepEntity
+                {
+                    Id = a.Id,
+                    Order = a.Order,
+                    ApproverName = a.ApproverName,
+                    ApproverEmail = a.ApproverEmail,
+                    Status = (int)a.Status,
+                    Signature = a.Signature,
+                    CompletedUtc = a.CompletedUtc
+                });
+                continue;
+            }
+
+            existingStep.Order = a.Order;
+            existingStep.ApproverName = a.ApproverName;
+            existingStep.ApproverEmail = a.ApproverEmail;
+            existingStep.Status = (int)a.Status;
+            existingStep.Signature = a.Signature;
+            existingStep.CompletedUtc = a.CompletedUtc;
         }
 
-        // update search index entries table for queryable search
-        db.RemoveRange(existing.SearchIndexEntries);
-        existing.SearchIndexEntries.Clear();
+        foreach (var existingStep in existing.ApprovalSteps.ToList())
+        {
+            if (entry.ApprovalSteps.All(a => a.Id != existingStep.Id))
+            {
+                db.ApprovalSteps.Remove(existingStep);
+            }
+        }
+
+        var existingSearchByKey = existing.SearchIndexEntries.ToDictionary(s => s.Key, StringComparer.OrdinalIgnoreCase);
         foreach (var kv in entry.SearchIndex)
         {
+            if (existingSearchByKey.TryGetValue(kv.Key, out var searchEntity))
+            {
+                searchEntity.Value = kv.Value ?? string.Empty;
+                continue;
+            }
+
             existing.SearchIndexEntries.Add(new EntrySearchIndexEntity
             {
                 Id = Guid.NewGuid(),
@@ -474,20 +614,46 @@ internal sealed class EfFormsRepository : IFormsRepository
             });
         }
 
-        db.RemoveRange(existing.Files);
-        existing.Files.Clear();
+        foreach (var existingSearch in existing.SearchIndexEntries.ToList())
+        {
+            if (!entry.SearchIndex.ContainsKey(existingSearch.Key))
+            {
+                db.EntrySearchIndex.Remove(existingSearch);
+            }
+        }
+
+        var filesById = existing.Files.ToDictionary(f => f.Id);
         foreach (var file in entry.Files)
         {
-            existing.Files.Add(new EntryFileMetadataEntity
+            if (!filesById.TryGetValue(file.Id, out var existingFile))
             {
-                Id = file.Id,
-                FieldId = file.FieldId,
-                FileName = file.FileName,
-                ContentType = file.ContentType,
-                Length = file.Length,
-                RelativePath = file.RelativePath,
-                UploadedUtc = file.UploadedUtc
-            });
+                existing.Files.Add(new EntryFileMetadataEntity
+                {
+                    Id = file.Id,
+                    FieldId = file.FieldId,
+                    FileName = file.FileName,
+                    ContentType = file.ContentType,
+                    Length = file.Length,
+                    RelativePath = file.RelativePath,
+                    UploadedUtc = file.UploadedUtc
+                });
+                continue;
+            }
+
+            existingFile.FieldId = file.FieldId;
+            existingFile.FileName = file.FileName;
+            existingFile.ContentType = file.ContentType;
+            existingFile.Length = file.Length;
+            existingFile.RelativePath = file.RelativePath;
+            existingFile.UploadedUtc = file.UploadedUtc;
+        }
+
+        foreach (var existingFile in existing.Files.ToList())
+        {
+            if (entry.Files.All(f => f.Id != existingFile.Id))
+            {
+                db.EntryFiles.Remove(existingFile);
+            }
         }
 
         try

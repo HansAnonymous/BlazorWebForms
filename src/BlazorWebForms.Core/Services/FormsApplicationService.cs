@@ -199,7 +199,25 @@ public sealed class FormsApplicationService(
                     ?? throw new InvalidOperationException("Entry not found.");
         var user = currentUserContext.GetCurrentUser();
 
+        var form = await repository.GetFormAsync(entry.FormId, cancellationToken)
+                   ?? throw new InvalidOperationException("Form not found.");
+
+        var version = form.Versions.FirstOrDefault(v => v.Id == entry.FormVersionId)
+                      ?? throw new InvalidOperationException("Form version not found for entry.");
+
+        var definition = serializer.Deserialize(version.DefinitionJson);
+
         entry.Answers = new Dictionary<string, string?>(answers, StringComparer.OrdinalIgnoreCase);
+        entry.SearchIndex = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var field in definition.Sections.SelectMany(section => section.Fields).Where(field => field.Searchable))
+        {
+            if (entry.Answers.TryGetValue(field.Id, out var value) && !string.IsNullOrWhiteSpace(value))
+            {
+                entry.SearchIndex[field.Id] = value!;
+            }
+        }
+
         entry.Revisions.Add(new EntryRevisionRecord
         {
             RevisionNumber = entry.Revisions.Count + 1,
@@ -234,6 +252,9 @@ public sealed class FormsApplicationService(
 
     public Task<IReadOnlyList<EntryRecord>> SearchEntriesAsync(Guid? formId, string? search, CancellationToken cancellationToken = default) =>
         repository.GetEntriesAsync(formId, search, cancellationToken);
+
+    public Task<IReadOnlyList<EntryRecord>> QueryEntriesAsync(EntryQueryOptions options, CancellationToken cancellationToken = default) =>
+        repository.QueryEntriesAsync(options, cancellationToken);
 
     public async Task<EntryDetailViewModel?> GetEntryDetailAsync(Guid entryId, CancellationToken cancellationToken = default)
     {

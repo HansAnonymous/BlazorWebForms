@@ -40,7 +40,7 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.Property(x => x.Name).IsRequired();
             b.Property(x => x.Description).HasMaxLength(2000);
             b.Property(x => x.DraftDefinitionJson).HasColumnType("nvarchar(max)");
-            b.Property(x => x.RowVersion).IsRowVersion();
+            b.Property(x => x.RowVersion).HasColumnType("rowversion").ValueGeneratedOnAddOrUpdate();
             b.HasIndex(x => x.Key).IsUnique();
             b.HasIndex(x => x.PublicationSlug).IsUnique();
             b.HasIndex(x => x.UpdatedUtc);
@@ -65,7 +65,7 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.Property(x => x.SubmittedByEmail).HasMaxLength(256);
             b.Property(x => x.Answers).HasConversion(dictNullableConverter).HasColumnType("nvarchar(max)");
             b.Property(x => x.SearchIndex).HasConversion(dictStringConverter).HasColumnType("nvarchar(max)");
-            b.Property(x => x.RowVersion).IsRowVersion();
+            b.Property(x => x.RowVersion).HasColumnType("rowversion").ValueGeneratedOnAddOrUpdate();
             b.HasIndex(x => x.FormId);
             b.HasIndex(x => new { x.FormId, x.SubmittedUtc });
             b.HasIndex(x => new { x.FormId, x.Status, x.SubmittedUtc });

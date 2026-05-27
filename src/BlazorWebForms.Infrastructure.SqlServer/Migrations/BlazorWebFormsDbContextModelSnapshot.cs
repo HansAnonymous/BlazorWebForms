@@ -80,7 +80,6 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<byte[]>("RowVersion")
-                        .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
 
@@ -267,7 +266,6 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<byte[]>("RowVersion")
-                        .IsConcurrencyToken()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
 

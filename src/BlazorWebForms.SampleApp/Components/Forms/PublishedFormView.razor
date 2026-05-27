@@ -17,6 +17,7 @@ else
             <div class="bwf-meta">
                 <span>v@ViewModel.Version.VersionNumber</span>
                 <span>@ViewModel.Form.Publication.AccessMode</span>
+                <span>Historical snapshot enabled</span>
             </div>
         </header>
 
@@ -36,6 +37,10 @@ else
                 <button class="bwf-button" @onclick="AddApprover">Add approver</button>
                 <button class="bwf-button bwf-button-primary" @onclick="SubmitAsync">Submit</button>
             </div>
+            @if (Files.Count > 0)
+            {
+                <p class="bwf-help">Attached files: @string.Join(", ", Files.Select(f => f.File.FileName))</p>
+            }
         </section>
 
         @if (!string.IsNullOrWhiteSpace(StatusMessage))

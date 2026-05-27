@@ -298,6 +298,18 @@ h1:focus {
     font-weight: 700;
 }
 
+.feature-list {
+    color: #354861;
+    display: grid;
+    gap: 0.45rem;
+    margin: 0.75rem 0 0;
+    padding-left: 1.2rem;
+}
+
+.feature-list li {
+    line-height: 1.4;
+}
+
 @media (max-width: 900px) {
     .hero-shell,
     .bwf-builder {

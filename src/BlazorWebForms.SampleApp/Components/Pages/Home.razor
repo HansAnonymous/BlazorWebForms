@@ -12,10 +12,10 @@ else
     <section class="hero-shell">
         <div class="hero-copy">
             <p class="eyebrow">Dynamic forms package for Blazor</p>
-            <h1>Build, publish, submit, revise, approve.</h1>
+            <h1>Build, publish, submit, revise, approve, and audit with SQL-backed history.</h1>
             <p class="hero-text">
-                Server-side interactive Blazor package with JSON-backed form versions, searchable entries,
-                manager notifications, and approval trails.
+                Interactive Blazor sample app now runs on EF Core + SQL persistence with immutable versions,
+                historical entry rendering, indexed admin queries, file metadata tracking, and workflow auditing.
             </p>
             <div class="hero-actions">
                 <a class="hero-button hero-button-primary" href="/builder">Open builder</a>
@@ -32,10 +32,26 @@ else
                 <strong>@Dashboard.RecentEntries.Count</strong>
             </div>
             <div class="metric-card">
+                <span>Needs approval</span>
+                <strong>@Dashboard.RecentEntries.Count(entry => entry.Status == EntryStatus.NeedsApproval)</strong>
+            </div>
+            <div class="metric-card">
                 <span>Demo route</span>
                 <strong>/forms/expense-approval</strong>
             </div>
         </div>
+    </section>
+
+    <section class="bwf-panel">
+        <p class="bwf-kicker">Milestone 1 implemented</p>
+        <h2>What this sample demonstrates right now</h2>
+        <ul class="feature-list">
+            <li>EF Core migrations + SQL Server/Azure SQL persistence for forms, entries, versions, approvals, files, and search index.</li>
+            <li>Immutable publish snapshots with entry details rendered from the exact submitted version.</li>
+            <li>Admin query filters by status, indexed fields, and text search (server-side query path).</li>
+            <li>Submission revisions and approval progression stored as auditable history.</li>
+            <li>File uploads written to storage with entry-linked metadata persisted in SQL.</li>
+        </ul>
     </section>
 
     <section class="info-grid">

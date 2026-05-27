@@ -24,6 +24,10 @@ else
                 <span>Revisions</span>
                 <strong>@ViewModel.Entry.Revisions.Count</strong>
             </div>
+            <div class="metric-card">
+                <span>Version</span>
+                <strong>@ViewModel.Entry.FormVersionId</strong>
+            </div>
         </header>
 
         @if (!string.IsNullOrWhiteSpace(ViewModel.HistoricalRenderWarning))
@@ -35,6 +39,23 @@ else
         }
 
         <DynamicFormRenderer Definition="ViewModel.Definition" Answers="ReadOnlyAnswers" ReadOnly="true" />
+
+        @if (ViewModel.Entry.Files.Count > 0)
+        {
+            <section class="info-card">
+                <h2>Stored files metadata</h2>
+                @foreach (var file in ViewModel.Entry.Files)
+                {
+                    <div class="approval-row">
+                        <div>
+                            <strong>@file.FileName</strong>
+                            <div>@file.ContentType</div>
+                        </div>
+                        <div>@file.Length bytes</div>
+                    </div>
+                }
+            </section>
+        }
 
         @if (ViewModel.Entry.ApprovalSteps.Count > 0)
         {

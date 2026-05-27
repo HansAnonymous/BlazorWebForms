@@ -73,6 +73,17 @@ public sealed class EntryFileRecord
     public DateTimeOffset UploadedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
+public sealed class EntryQueryOptions
+{
+    public Guid? FormId { get; set; }
+    public EntryStatus? Status { get; set; }
+    public DateTimeOffset? SubmittedFromUtc { get; set; }
+    public DateTimeOffset? SubmittedToUtc { get; set; }
+    public string? Search { get; set; }
+    public string? IndexedFieldId { get; set; }
+    public string? IndexedFieldValue { get; set; }
+}
+
 public sealed class EntryRevisionRecord
 {
     public Guid Id { get; set; } = Guid.NewGuid();

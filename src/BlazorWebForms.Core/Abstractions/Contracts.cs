@@ -54,6 +54,7 @@ public interface IFormsRepository
     Task<FormAggregate?> GetFormBySlugAsync(string slug, CancellationToken cancellationToken = default);
     Task SaveFormAsync(FormAggregate form, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<EntryRecord>> GetEntriesAsync(Guid? formId, string? search, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<EntryRecord>> QueryEntriesAsync(EntryQueryOptions options, CancellationToken cancellationToken = default);
     Task<EntryRecord?> GetEntryAsync(Guid entryId, CancellationToken cancellationToken = default);
     Task SaveEntryAsync(EntryRecord entry, CancellationToken cancellationToken = default);
 }

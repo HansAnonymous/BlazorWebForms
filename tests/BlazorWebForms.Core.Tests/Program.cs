@@ -109,6 +109,30 @@ internal sealed class FakeRepository : IFormsRepository
         return Task.FromResult<IReadOnlyList<EntryRecord>>(query.ToList());
     }
 
+    public Task<IReadOnlyList<EntryRecord>> QueryEntriesAsync(EntryQueryOptions options, CancellationToken cancellationToken = default)
+    {
+        IEnumerable<EntryRecord> query = entries.Values;
+
+        if (options.FormId.HasValue)
+        {
+            query = query.Where(x => x.FormId == options.FormId.Value);
+        }
+
+        if (options.Status.HasValue)
+        {
+            query = query.Where(x => x.Status == options.Status.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Search))
+        {
+            query = query.Where(x =>
+                x.SubmittedBy.Contains(options.Search, StringComparison.OrdinalIgnoreCase) ||
+                x.SearchIndex.Values.Any(v => v.Contains(options.Search, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        return Task.FromResult<IReadOnlyList<EntryRecord>>(query.ToList());
+    }
+
     public Task<EntryRecord?> GetEntryAsync(Guid entryId, CancellationToken cancellationToken = default)
     {
         entries.TryGetValue(entryId, out var entry);

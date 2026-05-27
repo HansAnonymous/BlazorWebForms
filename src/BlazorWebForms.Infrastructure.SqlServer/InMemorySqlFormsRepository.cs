@@ -128,18 +128,49 @@ internal sealed class InMemorySqlFormsRepository(IFormDefinitionSerializer seria
 
     public Task<IReadOnlyList<EntryRecord>> GetEntriesAsync(Guid? formId, string? search, CancellationToken cancellationToken = default)
     {
+        return QueryEntriesAsync(new EntryQueryOptions
+        {
+            FormId = formId,
+            Search = search
+        }, cancellationToken);
+    }
+
+    public Task<IReadOnlyList<EntryRecord>> QueryEntriesAsync(EntryQueryOptions options, CancellationToken cancellationToken = default)
+    {
         IEnumerable<EntryRecord> query = entries.Values;
 
-        if (formId.HasValue)
+        if (options.FormId.HasValue)
         {
-            query = query.Where(entry => entry.FormId == formId.Value);
+            query = query.Where(entry => entry.FormId == options.FormId.Value);
         }
 
-        if (!string.IsNullOrWhiteSpace(search))
+        if (options.Status.HasValue)
+        {
+            query = query.Where(entry => entry.Status == options.Status.Value);
+        }
+
+        if (options.SubmittedFromUtc.HasValue)
+        {
+            query = query.Where(entry => entry.SubmittedUtc >= options.SubmittedFromUtc.Value);
+        }
+
+        if (options.SubmittedToUtc.HasValue)
+        {
+            query = query.Where(entry => entry.SubmittedUtc <= options.SubmittedToUtc.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.IndexedFieldId) && !string.IsNullOrWhiteSpace(options.IndexedFieldValue))
         {
             query = query.Where(entry =>
-                entry.SearchIndex.Values.Any(value => value.Contains(search, StringComparison.OrdinalIgnoreCase)) ||
-                entry.SubmittedBy.Contains(search, StringComparison.OrdinalIgnoreCase));
+                entry.SearchIndex.TryGetValue(options.IndexedFieldId, out var indexedValue) &&
+                indexedValue.Contains(options.IndexedFieldValue, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.Search))
+        {
+            query = query.Where(entry =>
+                entry.SearchIndex.Values.Any(value => value.Contains(options.Search, StringComparison.OrdinalIgnoreCase)) ||
+                entry.SubmittedBy.Contains(options.Search, StringComparison.OrdinalIgnoreCase));
         }
 
         return Task.FromResult<IReadOnlyList<EntryRecord>>(query.Select(CloneEntry).OrderByDescending(x => x.SubmittedUtc).ToList());

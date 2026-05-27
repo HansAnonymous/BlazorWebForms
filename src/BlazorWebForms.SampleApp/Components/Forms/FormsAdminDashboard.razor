@@ -36,7 +36,18 @@ else
                     <p class="bwf-kicker">Response tracking</p>
                     <h2>Entries</h2>
                 </div>
-                <input class="bwf-input" @bind="Search" @bind:event="oninput" placeholder="Search submitter or indexed values" />
+                <input class="bwf-input" value="@Search" @oninput="OnSearchChanged" placeholder="Search submitter or indexed values" />
+            </div>
+            <div class="bwf-grid">
+                <select class="bwf-input" @bind="StatusFilter" @bind:after="LoadEntriesAsync">
+                    <option value="">All statuses</option>
+                    @foreach (var status in Enum.GetValues<EntryStatus>())
+                    {
+                        <option value="@status">@status</option>
+                    }
+                </select>
+                <input class="bwf-input" @bind="IndexedFieldId" @bind:after="LoadEntriesAsync" placeholder="Indexed field id (optional)" />
+                <input class="bwf-input" @bind="IndexedFieldValue" @bind:after="LoadEntriesAsync" placeholder="Indexed field value (optional)" />
             </div>
             <table class="bwf-table">
                 <thead>
@@ -44,21 +55,30 @@ else
                         <th>Submitter</th>
                         <th>Status</th>
                         <th>Submitted</th>
+                        <th>Version</th>
+                        <th>Files</th>
                         <th>Search index</th>
                     </tr>
                 </thead>
                 <tbody>
-                    @foreach (var entry in FilteredEntries)
+                    @foreach (var entry in Entries)
                     {
                         <tr>
                             <td><a href="/entries/@entry.Id">@entry.SubmittedBy</a></td>
                             <td>@entry.Status</td>
                             <td>@entry.SubmittedUtc.LocalDateTime</td>
+                            <td>@entry.FormVersionId</td>
+                            <td>@entry.Files.Count</td>
                             <td>@string.Join(", ", entry.SearchIndex.Select(x => $"{x.Key}:{x.Value}"))</td>
                         </tr>
                     }
                 </tbody>
             </table>
+
+            @if (Entries.Count == 0)
+            {
+                <p class="bwf-help">No entries match the current filter set.</p>
+            }
         </section>
     </div>
 }
@@ -66,16 +86,38 @@ else
 @code {
     private DashboardViewModel? Dashboard { get; set; }
     private string Search { get; set; } = string.Empty;
-
-    private IEnumerable<EntryRecord> FilteredEntries =>
-        Dashboard?.RecentEntries.Where(entry =>
-            string.IsNullOrWhiteSpace(Search) ||
-            entry.SubmittedBy.Contains(Search, StringComparison.OrdinalIgnoreCase) ||
-            entry.SearchIndex.Values.Any(value => value.Contains(Search, StringComparison.OrdinalIgnoreCase)))
-        ?? [];
+    private EntryStatus? StatusFilter { get; set; }
+    private string IndexedFieldId { get; set; } = string.Empty;
+    private string IndexedFieldValue { get; set; } = string.Empty;
+    private List<EntryRecord> Entries { get; set; } = [];
 
     protected override async Task OnInitializedAsync()
     {
         Dashboard = await FormsService.GetDashboardAsync();
+        await LoadEntriesAsync();
+    }
+
+    private async Task OnSearchChanged(ChangeEventArgs args)
+    {
+        Search = args.Value?.ToString() ?? string.Empty;
+        await LoadEntriesAsync();
+    }
+
+    private async Task LoadEntriesAsync()
+    {
+        if (Dashboard is null)
+        {
+            return;
+        }
+
+        var options = new EntryQueryOptions
+        {
+            Search = Search,
+            Status = StatusFilter,
+            IndexedFieldId = IndexedFieldId,
+            IndexedFieldValue = IndexedFieldValue
+        };
+
+        Entries = (await FormsService.QueryEntriesAsync(options)).ToList();
     }
 }
