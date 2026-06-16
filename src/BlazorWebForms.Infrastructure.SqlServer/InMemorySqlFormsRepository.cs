@@ -43,7 +43,8 @@ internal sealed class InMemorySqlFormsRepository(IFormDefinitionSerializer seria
             {
                 Slug = "expense-approval",
                 AccessMode = FormAccessMode.Public,
-                Domain = "demo.local"
+                Domain = "demo.local",
+                EditMode = SubmissionEditMode.ImmutableRevisions
             }
         };
 
@@ -174,7 +175,19 @@ internal sealed class InMemorySqlFormsRepository(IFormDefinitionSerializer seria
                 entry.SubmittedBy.Contains(options.Search, StringComparison.OrdinalIgnoreCase));
         }
 
-        return Task.FromResult<IReadOnlyList<EntryRecord>>(query.Select(CloneEntry).OrderByDescending(x => x.SubmittedUtc).ToList());
+        query = query.OrderByDescending(x => x.SubmittedUtc);
+
+        if (options.Offset > 0)
+        {
+            query = query.Skip(options.Offset);
+        }
+
+        if (options.Limit > 0)
+        {
+            query = query.Take(options.Limit);
+        }
+
+        return Task.FromResult<IReadOnlyList<EntryRecord>>(query.Select(CloneEntry).ToList());
     }
 
     public Task<EntryRecord?> GetEntryAsync(Guid entryId, CancellationToken cancellationToken = default)
@@ -183,10 +196,59 @@ internal sealed class InMemorySqlFormsRepository(IFormDefinitionSerializer seria
         return Task.FromResult(entry is null ? null : CloneEntry(entry));
     }
 
+    public Task<EntryRecord?> GetDraftEntryAsync(Guid formId, string submittedByEmail, CancellationToken cancellationToken = default)
+    {
+        var entry = entries.Values
+            .Where(e => e.FormId == formId && e.Status == EntryStatus.Draft)
+            .OrderByDescending(e => e.SubmittedUtc)
+            .FirstOrDefault(e => string.Equals(e.SubmittedByEmail, submittedByEmail, StringComparison.OrdinalIgnoreCase));
+
+        return Task.FromResult(entry is null ? null : CloneEntry(entry));
+    }
+
     public Task SaveEntryAsync(EntryRecord entry, CancellationToken cancellationToken = default)
     {
         entries[entry.Id] = CloneEntry(entry);
         return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<EntryFileRecord>> GetOrphanedFilesAsync(DateTimeOffset olderThanUtc, CancellationToken cancellationToken = default)
+    {
+        var orphaned = entries.Values
+            .Where(entry => entry.Status == EntryStatus.Draft && entry.SubmittedUtc < olderThanUtc)
+            .SelectMany(entry => entry.Files)
+            .Select(file => new EntryFileRecord
+            {
+                Id = file.Id,
+                FieldId = file.FieldId,
+                FileName = file.FileName,
+                ContentType = file.ContentType,
+                Length = file.Length,
+                RelativePath = file.RelativePath,
+                Sha256 = file.Sha256,
+                UploadedByUserId = file.UploadedByUserId,
+                UploadedByEmail = file.UploadedByEmail,
+                RevisionNumber = file.RevisionNumber,
+                UploadedUtc = file.UploadedUtc
+            })
+            .ToList();
+
+        return Task.FromResult<IReadOnlyList<EntryFileRecord>>(orphaned);
+    }
+
+    public Task<int> DeleteDraftEntriesOlderThanAsync(DateTimeOffset olderThanUtc, CancellationToken cancellationToken = default)
+    {
+        var staleDraftIds = entries.Values
+            .Where(entry => entry.Status == EntryStatus.Draft && entry.SubmittedUtc < olderThanUtc)
+            .Select(entry => entry.Id)
+            .ToList();
+
+        foreach (var id in staleDraftIds)
+        {
+            entries.TryRemove(id, out _);
+        }
+
+        return Task.FromResult(staleDraftIds.Count);
     }
 
     public Task<IReadOnlyList<FormInvitation>> GetInvitationsAsync(Guid formId, CancellationToken cancellationToken = default)
@@ -234,7 +296,8 @@ internal sealed class InMemorySqlFormsRepository(IFormDefinitionSerializer seria
                 Slug = form.Publication.Slug,
                 Domain = form.Publication.Domain,
                 AccessMode = form.Publication.AccessMode,
-                SendSubmissionCopyToSubmitter = form.Publication.SendSubmissionCopyToSubmitter
+                SendSubmissionCopyToSubmitter = form.Publication.SendSubmissionCopyToSubmitter,
+                EditMode = form.Publication.EditMode
             },
             Versions = form.Versions.Select(version => new FormVersionRecord
             {
@@ -262,21 +325,51 @@ internal sealed class InMemorySqlFormsRepository(IFormDefinitionSerializer seria
     private static FormDefinition CloneDefinition(FormDefinition definition) =>
         new()
         {
+            SchemaVersion = definition.SchemaVersion,
             Title = definition.Title,
             Description = definition.Description,
+            DefaultCulture = definition.DefaultCulture,
             Branding = new BrandingDefinition
             {
                 AccentColor = definition.Branding.AccentColor,
+                SurfaceColor = definition.Branding.SurfaceColor,
+                TextColor = definition.Branding.TextColor,
+                ButtonRadius = definition.Branding.ButtonRadius,
                 HeroText = definition.Branding.HeroText,
-                LogoUrl = definition.Branding.LogoUrl
+                LogoUrl = definition.Branding.LogoUrl,
+                LogoFileRef = definition.Branding.LogoFileRef,
+                HeroImageUrl = definition.Branding.HeroImageUrl,
+                HeroImageFileRef = definition.Branding.HeroImageFileRef
             },
             LocalizedTitles = new Dictionary<string, string>(definition.LocalizedTitles, StringComparer.OrdinalIgnoreCase),
+            LocalizedDescriptions = new Dictionary<string, string>(definition.LocalizedDescriptions, StringComparer.OrdinalIgnoreCase),
             Sections = definition.Sections.Select(section => new FormSectionDefinition
             {
                 Id = section.Id,
                 Title = section.Title,
                 Description = section.Description,
                 VisibilityCondition = section.VisibilityCondition,
+                VisibilityRules = section.VisibilityRules is null
+                    ? null
+                    : new VisibilityConditionDefinition
+                    {
+                        Join = section.VisibilityRules.Join,
+                        Rules = section.VisibilityRules.Rules.Select(rule => new VisibilityRuleDefinition
+                        {
+                            FieldId = rule.FieldId,
+                            Operator = rule.Operator,
+                            Value = rule.Value
+                        }).ToList()
+                    },
+                Layout = section.Layout is null
+                    ? null
+                    : new FormSectionLayoutDefinition
+                    {
+                        Columns = section.Layout.Columns,
+                        Group = section.Layout.Group
+                    },
+                LocalizedTitles = new Dictionary<string, string>(section.LocalizedTitles, StringComparer.OrdinalIgnoreCase),
+                LocalizedDescriptions = new Dictionary<string, string>(section.LocalizedDescriptions, StringComparer.OrdinalIgnoreCase),
                 Fields = section.Fields.Select(field => new FormFieldDefinition
                 {
                     Id = field.Id,
@@ -287,11 +380,41 @@ internal sealed class InMemorySqlFormsRepository(IFormDefinitionSerializer seria
                     Required = field.Required,
                     Searchable = field.Searchable,
                     RegexPattern = field.RegexPattern,
+                    DefaultValue = field.DefaultValue,
+                    ValidationHint = field.ValidationHint,
                     VisibilityCondition = field.VisibilityCondition,
+                    VisibilityRules = field.VisibilityRules is null
+                        ? null
+                        : new VisibilityConditionDefinition
+                        {
+                            Join = field.VisibilityRules.Join,
+                            Rules = field.VisibilityRules.Rules.Select(rule => new VisibilityRuleDefinition
+                            {
+                                FieldId = rule.FieldId,
+                                Operator = rule.Operator,
+                                Value = rule.Value
+                            }).ToList()
+                        },
+                    Layout = field.Layout is null
+                        ? null
+                        : new FormFieldLayoutDefinition
+                        {
+                            WidthHint = field.Layout.WidthHint,
+                            Group = field.Layout.Group
+                        },
+                    LocalizedLabels = new Dictionary<string, string>(field.LocalizedLabels, StringComparer.OrdinalIgnoreCase),
+                    LocalizedPlaceholders = new Dictionary<string, string>(field.LocalizedPlaceholders, StringComparer.OrdinalIgnoreCase),
+                    LocalizedHelpTexts = new Dictionary<string, string>(field.LocalizedHelpTexts, StringComparer.OrdinalIgnoreCase),
+                    LocalizedValidationHints = new Dictionary<string, string>(field.LocalizedValidationHints, StringComparer.OrdinalIgnoreCase),
+                    MaxFileSizeBytes = field.MaxFileSizeBytes,
+                    MaxFileCount = field.MaxFileCount,
+                    AllowedMimeTypes = field.AllowedMimeTypes.Select(value => value).ToList(),
+                    AllowedExtensions = field.AllowedExtensions.Select(value => value).ToList(),
                     Options = field.Options.Select(option => new FormFieldOption
                     {
                         Value = option.Value,
-                        Label = option.Label
+                        Label = option.Label,
+                        LocalizedLabels = new Dictionary<string, string>(option.LocalizedLabels, StringComparer.OrdinalIgnoreCase)
                     }).ToList()
                 }).ToList()
             }).ToList()
@@ -309,6 +432,20 @@ internal sealed class InMemorySqlFormsRepository(IFormDefinitionSerializer seria
             Status = entry.Status,
             Answers = new Dictionary<string, string?>(entry.Answers, StringComparer.OrdinalIgnoreCase),
             SearchIndex = new Dictionary<string, string>(entry.SearchIndex, StringComparer.OrdinalIgnoreCase),
+            Files = entry.Files.Select(file => new EntryFileRecord
+            {
+                Id = file.Id,
+                FieldId = file.FieldId,
+                FileName = file.FileName,
+                ContentType = file.ContentType,
+                Length = file.Length,
+                RelativePath = file.RelativePath,
+                Sha256 = file.Sha256,
+                UploadedByUserId = file.UploadedByUserId,
+                UploadedByEmail = file.UploadedByEmail,
+                RevisionNumber = file.RevisionNumber,
+                UploadedUtc = file.UploadedUtc
+            }).ToList(),
             Revisions = entry.Revisions.Select(revision => new EntryRevisionRecord
             {
                 Id = revision.Id,
@@ -325,8 +462,22 @@ internal sealed class InMemorySqlFormsRepository(IFormDefinitionSerializer seria
                 ApproverEmail = step.ApproverEmail,
                 Status = step.Status,
                 Signature = step.Signature,
+                RejectionReason = step.RejectionReason,
                 CompletedUtc = step.CompletedUtc
-            }).ToList()
+            }).ToList(),
+            ApprovalAuditTrail = entry.ApprovalAuditTrail
+                .OrderBy(a => a.OccurredUtc)
+                .Select(a => new ApprovalAuditEvent
+                {
+                    Id = a.Id,
+                    Action = a.Action,
+                    ApprovalStepId = a.ApprovalStepId,
+                    ActorUserId = a.ActorUserId,
+                    ActorDisplayName = a.ActorDisplayName,
+                    Signature = a.Signature,
+                    Reason = a.Reason,
+                    OccurredUtc = a.OccurredUtc
+                }).ToList()
         };
 
     private static FormInvitation CloneInvitation(FormInvitation invitation) =>

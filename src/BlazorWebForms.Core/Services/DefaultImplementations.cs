@@ -149,6 +149,7 @@ internal sealed class DefaultPermissionEvaluator : IPermissionEvaluator
     public bool CanViewEntry(FormAggregate form, EntryRecord entry, UserProfile user) =>
         IsAdmin(user) ||
         CanManageForm(form, user) ||
+        entry.ApprovalSteps.Any(s => string.Equals(s.ApproverEmail, user.Email, StringComparison.OrdinalIgnoreCase)) ||
         string.Equals(entry.SubmittedByEmail, user.Email, StringComparison.OrdinalIgnoreCase) ||
         form.Permissions.Any(p => p.UserId == user.UserId &&
                                   (p.Role == FormPermissionRole.Viewer || p.Role == FormPermissionRole.SelfViewer) &&

@@ -17,6 +17,7 @@ public class FormEntity
     public string PublicationDomain { get; set; } = string.Empty;
     public int PublicationAccessMode { get; set; }
     public bool PublicationSendSubmissionCopyToSubmitter { get; set; }
+    public int PublicationEditMode { get; set; }
     public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     public ICollection<FormVersionEntity> Versions { get; set; } = new List<FormVersionEntity>();
@@ -74,6 +75,7 @@ public class EntryEntity
 
     public ICollection<EntryRevisionEntity> Revisions { get; set; } = new List<EntryRevisionEntity>();
     public ICollection<ApprovalStepEntity> ApprovalSteps { get; set; } = new List<ApprovalStepEntity>();
+    public ICollection<ApprovalAuditEventEntity> ApprovalAuditTrail { get; set; } = new List<ApprovalAuditEventEntity>();
     public ICollection<EntrySearchIndexEntity> SearchIndexEntries { get; set; } = new List<EntrySearchIndexEntity>();
     public ICollection<EntryFileMetadataEntity> Files { get; set; } = new List<EntryFileMetadataEntity>();
 }
@@ -99,7 +101,23 @@ public class ApprovalStepEntity
     public string ApproverEmail { get; set; } = string.Empty;
     public int Status { get; set; }
     public string? Signature { get; set; }
+    public string? RejectionReason { get; set; }
     public DateTimeOffset? CompletedUtc { get; set; }
+}
+
+public class ApprovalAuditEventEntity
+{
+    public Guid Id { get; set; }
+    public Guid EntryId { get; set; }
+    public EntryEntity? Entry { get; set; }
+    public int Action { get; set; }
+    public Guid? ApprovalStepId { get; set; }
+    public Guid ActorUserId { get; set; }
+    public string ActorDisplayName { get; set; } = string.Empty;
+    public string? Signature { get; set; }
+    public string? Reason { get; set; }
+    public string? CorrelationId { get; set; }
+    public DateTimeOffset OccurredUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public class EntrySearchIndexEntity
@@ -121,6 +139,10 @@ public class EntryFileMetadataEntity
     public string ContentType { get; set; } = "application/octet-stream";
     public long Length { get; set; }
     public string RelativePath { get; set; } = string.Empty;
+    public string Sha256 { get; set; } = string.Empty;
+    public Guid UploadedByUserId { get; set; }
+    public string UploadedByEmail { get; set; } = string.Empty;
+    public int RevisionNumber { get; set; }
     public DateTimeOffset UploadedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 

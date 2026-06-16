@@ -49,9 +49,10 @@
 
 .nav-list ::deep .nav-link {
     border-radius: 999px;
-    color: #30435a;
+    color: #22364d;
     font-size: 0.95rem;
     font-weight: 600;
+    min-height: 2.75rem;
     padding: 0.65rem 0.9rem;
     text-decoration: none;
     transition: background-color 120ms ease, color 120ms ease;
@@ -63,6 +64,6 @@
 }
 
 .nav-list ::deep a.active {
-    background: #d2e3fc;
-    color: #0b57d0;
+    background: #c7dcff;
+    color: #083b8a;
 }

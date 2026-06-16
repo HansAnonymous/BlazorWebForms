@@ -17,6 +17,7 @@ public sealed class BlazorWebFormsDbContext : DbContext
     public DbSet<EntryFileMetadataEntity> EntryFiles { get; set; } = null!;
     public DbSet<EntryRevisionEntity> EntryRevisions { get; set; } = null!;
     public DbSet<ApprovalStepEntity> ApprovalSteps { get; set; } = null!;
+    public DbSet<ApprovalAuditEventEntity> ApprovalAuditEvents { get; set; } = null!;
     public DbSet<FormPermissionEntity> FormPermissions { get; set; } = null!;
     public DbSet<FormNotificationEntity> FormNotifications { get; set; } = null!;
     public DbSet<FormInvitationEntity> FormInvitations { get; set; } = null!;
@@ -66,7 +67,7 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.Property(x => x.SubmittedByEmail).HasMaxLength(256);
             b.Property(x => x.Answers).HasConversion(dictNullableConverter).HasColumnType("nvarchar(max)");
             b.Property(x => x.SearchIndex).HasConversion(dictStringConverter).HasColumnType("nvarchar(max)");
-            b.Property(x => x.RowVersion).HasColumnType("rowversion").ValueGeneratedOnAddOrUpdate();
+            b.Ignore(x => x.RowVersion);
             b.HasIndex(x => x.FormId);
             b.HasIndex(x => new { x.FormId, x.SubmittedUtc });
             b.HasIndex(x => new { x.FormId, x.Status, x.SubmittedUtc });
@@ -74,6 +75,7 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.HasIndex(x => x.SubmittedUtc);
             b.HasMany(x => x.Revisions).WithOne(r => r.Entry).HasForeignKey(r => r.EntryId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.ApprovalSteps).WithOne(a => a.Entry).HasForeignKey(a => a.EntryId).OnDelete(DeleteBehavior.Cascade);
+            b.HasMany(x => x.ApprovalAuditTrail).WithOne(a => a.Entry).HasForeignKey(a => a.EntryId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.SearchIndexEntries).WithOne(s => s.Entry).HasForeignKey(s => s.EntryId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Files).WithOne(f => f.Entry).HasForeignKey(f => f.EntryId).OnDelete(DeleteBehavior.Cascade);
         });
@@ -90,8 +92,21 @@ public sealed class BlazorWebFormsDbContext : DbContext
         {
             b.ToTable("ApprovalSteps");
             b.HasKey(x => x.Id);
+            b.Property(x => x.RejectionReason).HasMaxLength(2000);
             b.HasIndex(x => new { x.EntryId, x.Order }).IsUnique();
             b.HasIndex(x => x.Status);
+        });
+
+        modelBuilder.Entity<ApprovalAuditEventEntity>(b =>
+        {
+            b.ToTable("ApprovalAuditEvents");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.ActorDisplayName).HasMaxLength(256).IsRequired();
+            b.Property(x => x.Signature).HasMaxLength(1024);
+            b.Property(x => x.Reason).HasMaxLength(2000);
+            b.Property(x => x.CorrelationId).HasMaxLength(128);
+            b.HasIndex(x => new { x.EntryId, x.OccurredUtc });
+            b.HasIndex(x => new { x.EntryId, x.Action });
         });
 
         modelBuilder.Entity<FormPermissionEntity>(b =>
@@ -143,8 +158,11 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.Property(x => x.FileName).HasMaxLength(260).IsRequired();
             b.Property(x => x.ContentType).HasMaxLength(128).IsRequired();
             b.Property(x => x.RelativePath).HasMaxLength(512).IsRequired();
+            b.Property(x => x.Sha256).HasMaxLength(64).IsRequired();
+            b.Property(x => x.UploadedByEmail).HasMaxLength(256).IsRequired();
             b.HasIndex(x => x.EntryId);
             b.HasIndex(x => new { x.EntryId, x.FieldId });
+            b.HasIndex(x => x.RelativePath).IsUnique();
             b.HasOne(x => x.Entry).WithMany(e => e.Files).HasForeignKey(x => x.EntryId).OnDelete(DeleteBehavior.Cascade);
         });
     }

@@ -1,16 +1,19 @@
+@inject AppLocalizer L
+
 <div class="brand-block">
     <div class="brand-mark" aria-hidden="true">G</div>
+    <span class="visually-hidden">Brand mark icon</span>
     <div>
-        <p class="brand-caption">Workspace</p>
+        <p class="brand-caption">@L.Get("Nav.Workspace")</p>
         <a class="navbar-brand" href="">BlazorWebForms</a>
     </div>
 </div>
 
-<p class="nav-section-label">Forms</p>
+<p class="nav-section-label">@L.Get("Nav.Forms")</p>
 
-<nav class="nav-list">
-    <NavLink class="nav-link" href="" Match="NavLinkMatch.All">Overview</NavLink>
-    <NavLink class="nav-link" href="admin">Admin (server query)</NavLink>
-    <NavLink class="nav-link" href="builder">Builder + publish</NavLink>
-    <NavLink class="nav-link" href="forms/expense-approval">Published + upload</NavLink>
+<nav class="nav-list" aria-label="Forms navigation">
+    <NavLink class="nav-link" href="" Match="NavLinkMatch.All">@L.Get("Nav.Overview")</NavLink>
+    <NavLink class="nav-link" href="admin">@L.Get("Nav.Admin")</NavLink>
+    <NavLink class="nav-link" href="builder">@L.Get("Nav.Builder")</NavLink>
+    <NavLink class="nav-link" href="forms/expense-approval">@L.Get("Nav.Published")</NavLink>
 </nav>

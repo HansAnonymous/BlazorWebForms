@@ -56,7 +56,8 @@
     border-radius: 0.5rem;
     font-size: 0.78rem;
     line-height: 1.2;
-    padding: 0.25rem 0.45rem;
+    min-height: 2.75rem;
+    padding: 0.35rem 0.55rem;
 }
 
 .app-auth-input {
@@ -87,6 +88,9 @@
     color: #1967d2;
     font-weight: 600;
     text-decoration: none;
+    min-height: 2.75rem;
+    display: inline-flex;
+    align-items: center;
 }
 
 .app-top-row ::deep a:hover {

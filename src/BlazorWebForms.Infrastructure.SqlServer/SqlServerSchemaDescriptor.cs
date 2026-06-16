@@ -22,6 +22,7 @@ public sealed class SqlServerSchemaDescriptor(BlazorWebFormsSqlServerOptions opt
             [PublicationDomain] NVARCHAR(MAX) NOT NULL,
             [PublicationAccessMode] INT NOT NULL,
             [PublicationSendSubmissionCopyToSubmitter] BIT NOT NULL,
+            [PublicationEditMode] INT NOT NULL CONSTRAINT [DF_Forms_PublicationEditMode] DEFAULT(0),
             [RowVersion] ROWVERSION NOT NULL
         );
 
@@ -78,6 +79,10 @@ public sealed class SqlServerSchemaDescriptor(BlazorWebFormsSqlServerOptions opt
             [ContentType] NVARCHAR(128) NOT NULL,
             [RelativePath] NVARCHAR(512) NOT NULL,
             [Length] BIGINT NOT NULL,
+            [Sha256] NVARCHAR(64) NOT NULL,
+            [UploadedByUserId] UNIQUEIDENTIFIER NOT NULL,
+            [UploadedByEmail] NVARCHAR(256) NOT NULL,
+            [RevisionNumber] INT NOT NULL,
             [UploadedUtc] DATETIMEOFFSET NOT NULL,
             CONSTRAINT [FK_EntryFiles_Entries_EntryId] FOREIGN KEY ([EntryId]) REFERENCES [{options.SchemaName}].[Entries]([Id]) ON DELETE CASCADE
         );
@@ -88,6 +93,20 @@ public sealed class SqlServerSchemaDescriptor(BlazorWebFormsSqlServerOptions opt
             [Key] NVARCHAR(450) NOT NULL,
             [Value] NVARCHAR(450) NOT NULL,
             CONSTRAINT [FK_EntrySearchIndex_Entries_EntryId] FOREIGN KEY ([EntryId]) REFERENCES [{options.SchemaName}].[Entries]([Id]) ON DELETE CASCADE
+        );
+
+        CREATE TABLE [{options.SchemaName}].[ApprovalAuditEvents] (
+            [Id] UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+            [EntryId] UNIQUEIDENTIFIER NOT NULL,
+            [Action] INT NOT NULL,
+            [ApprovalStepId] UNIQUEIDENTIFIER NULL,
+            [ActorUserId] UNIQUEIDENTIFIER NOT NULL,
+            [ActorDisplayName] NVARCHAR(256) NOT NULL,
+            [Signature] NVARCHAR(1024) NULL,
+            [Reason] NVARCHAR(2000) NULL,
+            [CorrelationId] NVARCHAR(128) NULL,
+            [OccurredUtc] DATETIMEOFFSET NOT NULL,
+            CONSTRAINT [FK_ApprovalAuditEvents_Entries_EntryId] FOREIGN KEY ([EntryId]) REFERENCES [{options.SchemaName}].[Entries]([Id]) ON DELETE CASCADE
         );
 
         CREATE TABLE [{options.SchemaName}].[FormPermissions] (
@@ -120,8 +139,12 @@ public sealed class SqlServerSchemaDescriptor(BlazorWebFormsSqlServerOptions opt
         CREATE UNIQUE INDEX [IX_EntryRevisions_EntryId_RevisionNumber] ON [{options.SchemaName}].[EntryRevisions] ([EntryId], [RevisionNumber]);
         CREATE UNIQUE INDEX [IX_ApprovalSteps_EntryId_Order] ON [{options.SchemaName}].[ApprovalSteps] ([EntryId], [Order]);
         CREATE INDEX [IX_ApprovalSteps_Status] ON [{options.SchemaName}].[ApprovalSteps] ([Status]);
+        CREATE INDEX [IX_ApprovalAuditEvents_EntryId_OccurredUtc] ON [{options.SchemaName}].[ApprovalAuditEvents] ([EntryId], [OccurredUtc]);
+        CREATE INDEX [IX_ApprovalAuditEvents_EntryId_Action] ON [{options.SchemaName}].[ApprovalAuditEvents] ([EntryId], [Action]);
+        CREATE INDEX [IX_ApprovalAuditEvents_CorrelationId] ON [{options.SchemaName}].[ApprovalAuditEvents] ([CorrelationId]);
         CREATE INDEX [IX_EntryFiles_EntryId] ON [{options.SchemaName}].[EntryFiles] ([EntryId]);
         CREATE INDEX [IX_EntryFiles_EntryId_FieldId] ON [{options.SchemaName}].[EntryFiles] ([EntryId], [FieldId]);
+        CREATE UNIQUE INDEX [IX_EntryFiles_RelativePath] ON [{options.SchemaName}].[EntryFiles] ([RelativePath]);
         CREATE INDEX [IX_EntrySearchIndex_EntryId] ON [{options.SchemaName}].[EntrySearchIndex] ([EntryId]);
         CREATE INDEX [IX_EntrySearchIndex_EntryId_Key] ON [{options.SchemaName}].[EntrySearchIndex] ([EntryId], [Key]);
         CREATE INDEX [IX_EntrySearchIndex_Key_Value] ON [{options.SchemaName}].[EntrySearchIndex] ([Key], [Value]);

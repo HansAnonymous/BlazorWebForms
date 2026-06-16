@@ -1,5 +1,7 @@
 using BlazorWebForms.Core.Abstractions;
+using BlazorWebForms.Core.Models;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace BlazorWebForms.Core.Services;
 
@@ -11,7 +13,38 @@ public static class BlazorWebFormsServiceCollectionExtensions
         services.AddSingleton<IConditionEvaluator, SimpleConditionEvaluator>();
         services.AddSingleton<IFieldComponentRegistry, DefaultFieldComponentRegistry>();
         services.AddSingleton<IPermissionEvaluator, DefaultPermissionEvaluator>();
+        services.AddSingleton<ICoreMetadataCache, InMemoryCoreMetadataCache>();
+        services.TryAddSingleton<IAntiAbuseGuard, NoOpAntiAbuseGuard>();
+        services.TryAddSingleton<IOperationalTelemetry, NoOpOperationalTelemetry>();
         services.AddScoped<FormsApplicationService>();
         return services;
+    }
+}
+
+internal sealed class NoOpAntiAbuseGuard : IAntiAbuseGuard
+{
+    public Task CheckUploadAllowedAsync(UserProfile user, FileUploadRequest request, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+
+    public Task CheckOutboundNotificationAllowedAsync(string channel, string recipient, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+}
+
+internal sealed class NoOpOperationalTelemetry : IOperationalTelemetry
+{
+    public void TrackUpload(string source, long bytes, bool success)
+    {
+    }
+
+    public void TrackPdfExport(string source, long bytes, bool success)
+    {
+    }
+
+    public void TrackEmailDelivery(string channel, bool success)
+    {
+    }
+
+    public void TrackFailure(string area, string operation, string reason)
+    {
     }
 }

@@ -1,6 +1,8 @@
+@using BlazorWebForms.Core.Abstractions
 @using BlazorWebForms.Core.Services
 @inject FormsApplicationService FormsService
 @inject NavigationManager NavigationManager
+@inject IConditionEvaluator ConditionEvaluator
 
 @if (State is null)
 {
@@ -26,6 +28,20 @@ else
                     <span>Description</span>
                     <textarea class="bwf-textarea" rows="3" @bind="State.Form.Description"></textarea>
                 </label>
+                <div class="bwf-grid">
+                    <label>
+                        <span>Default culture</span>
+                        <input class="bwf-input" value="@State.Form.DraftDefinition.DefaultCulture" @oninput="e => State.Form.DraftDefinition.DefaultCulture = e.Value?.ToString() ?? \"en-US\"" />
+                    </label>
+                    <label>
+                        <span>Form localized titles (culture|text)</span>
+                        <textarea class="bwf-textarea" rows="3" value="@GetLocalizationLines(State.Form.DraftDefinition.LocalizedTitles)" @onchange="e => SetLocalizationLines(State.Form.DraftDefinition.LocalizedTitles, e.Value?.ToString())"></textarea>
+                    </label>
+                    <label>
+                        <span>Form localized descriptions (culture|text)</span>
+                        <textarea class="bwf-textarea" rows="3" value="@GetLocalizationLines(State.Form.DraftDefinition.LocalizedDescriptions)" @onchange="e => SetLocalizationLines(State.Form.DraftDefinition.LocalizedDescriptions, e.Value?.ToString())"></textarea>
+                    </label>
+                </div>
                 <label>
                     <span>Access</span>
                     <select class="bwf-input" @bind="State.Form.Publication.AccessMode">
@@ -33,6 +49,54 @@ else
                         <option value="@FormAccessMode.Public">Public</option>
                     </select>
                 </label>
+                <label>
+                    <span>Edit after submit policy</span>
+                    <select class="bwf-input" @bind="State.Form.Publication.EditMode">
+                        <option value="@SubmissionEditMode.ImmutableRevisions">Immutable revisions</option>
+                        <option value="@SubmissionEditMode.OverwriteLatest">Overwrite latest</option>
+                    </select>
+                </label>
+                <section class="bwf-panel">
+                    <h3>Branding</h3>
+                    <div class="bwf-grid">
+                        <label>
+                            <span>Logo URL</span>
+                            <input class="bwf-input" @bind="State.Form.DraftDefinition.Branding.LogoUrl" placeholder="https://example.com/logo.png" />
+                        </label>
+                        <label>
+                            <span>Logo file ref</span>
+                            <input class="bwf-input" @bind="State.Form.DraftDefinition.Branding.LogoFileRef" placeholder="assets/logo.png" />
+                        </label>
+                        <label>
+                            <span>Hero image URL</span>
+                            <input class="bwf-input" @bind="State.Form.DraftDefinition.Branding.HeroImageUrl" placeholder="https://example.com/hero.jpg" />
+                        </label>
+                        <label>
+                            <span>Hero image file ref</span>
+                            <input class="bwf-input" @bind="State.Form.DraftDefinition.Branding.HeroImageFileRef" placeholder="assets/hero.jpg" />
+                        </label>
+                        <label>
+                            <span>Accent color</span>
+                            <input class="bwf-input" @bind="State.Form.DraftDefinition.Branding.AccentColor" placeholder="#0f766e" />
+                        </label>
+                        <label>
+                            <span>Surface color</span>
+                            <input class="bwf-input" @bind="State.Form.DraftDefinition.Branding.SurfaceColor" placeholder="#ffffff" />
+                        </label>
+                        <label>
+                            <span>Text color</span>
+                            <input class="bwf-input" @bind="State.Form.DraftDefinition.Branding.TextColor" placeholder="#124040" />
+                        </label>
+                        <label>
+                            <span>Button radius</span>
+                            <input class="bwf-input" @bind="State.Form.DraftDefinition.Branding.ButtonRadius" placeholder="999px" />
+                        </label>
+                    </div>
+                    <label>
+                        <span>Hero text</span>
+                        <textarea class="bwf-textarea" rows="2" @bind="State.Form.DraftDefinition.Branding.HeroText"></textarea>
+                    </label>
+                </section>
                 <div class="bwf-actions">
                     <button class="bwf-button" @onclick="AddSection">Add section</button>
                     <button class="bwf-button" @onclick="SaveDraftAsync">Save draft</button>
@@ -54,6 +118,14 @@ else
                         </label>
                         <div class="bwf-grid">
                             <label>
+                                <span>Section columns</span>
+                                <input class="bwf-input" type="number" min="1" max="4" value="@GetSectionColumnsValue(section)" @onchange="e => SetSectionColumns(section, e.Value?.ToString())" />
+                            </label>
+                            <label>
+                                <span>Section group</span>
+                                <input class="bwf-input" value="@GetSectionGroup(section)" @oninput="e => SetSectionGroup(section, e.Value?.ToString())" />
+                            </label>
+                            <label>
                                 <span>Section rules join</span>
                                 <select class="bwf-input" value="@GetSectionRulesJoin(section)" @onchange="e => SetSectionRulesJoin(section, e.Value?.ToString())">
                                     <option value="@VisibilityJoinOperator.And">And</option>
@@ -63,6 +135,14 @@ else
                             <label>
                                 <span>Section visibility rules (fieldId|operator|value)</span>
                                 <textarea class="bwf-textarea" rows="3" value="@GetRulesText(GetOrCreateRules(section))" @onchange="e => SetRulesText(section, e.Value?.ToString())"></textarea>
+                            </label>
+                            <label>
+                                <span>Section localized titles (culture|text)</span>
+                                <textarea class="bwf-textarea" rows="3" value="@GetLocalizationLines(section.LocalizedTitles)" @onchange="e => SetLocalizationLines(section.LocalizedTitles, e.Value?.ToString())"></textarea>
+                            </label>
+                            <label>
+                                <span>Section localized descriptions (culture|text)</span>
+                                <textarea class="bwf-textarea" rows="3" value="@GetLocalizationLines(section.LocalizedDescriptions)" @onchange="e => SetLocalizationLines(section.LocalizedDescriptions, e.Value?.ToString())"></textarea>
                             </label>
                         </div>
                         <div class="bwf-actions">
@@ -149,6 +229,36 @@ else
                                     <span>Visibility rules (fieldId|operator|value)</span>
                                     <textarea class="bwf-textarea" rows="3" value="@GetRulesText(GetOrCreateRules(field))" @onchange="e => SetRulesText(field, e.Value?.ToString())"></textarea>
                                 </label>
+                                <label>
+                                    <span>Width hint</span>
+                                    <select class="bwf-input" value="@GetFieldWidthHint(field)" @onchange="e => SetFieldWidthHint(field, e.Value?.ToString())">
+                                        <option value="Auto">Auto</option>
+                                        <option value="Half">Half</option>
+                                        <option value="Full">Full</option>
+                                        <option value="Third">Third</option>
+                                        <option value="TwoThirds">TwoThirds</option>
+                                    </select>
+                                </label>
+                                <label>
+                                    <span>Field group</span>
+                                    <input class="bwf-input" value="@GetFieldGroup(field)" @oninput="e => SetFieldGroup(field, e.Value?.ToString())" />
+                                </label>
+                                <label>
+                                    <span>Localized labels (culture|text)</span>
+                                    <textarea class="bwf-textarea" rows="3" value="@GetLocalizationLines(field.LocalizedLabels)" @onchange="e => SetLocalizationLines(field.LocalizedLabels, e.Value?.ToString())"></textarea>
+                                </label>
+                                <label>
+                                    <span>Localized placeholders (culture|text)</span>
+                                    <textarea class="bwf-textarea" rows="3" value="@GetLocalizationLines(field.LocalizedPlaceholders)" @onchange="e => SetLocalizationLines(field.LocalizedPlaceholders, e.Value?.ToString())"></textarea>
+                                </label>
+                                <label>
+                                    <span>Localized help texts (culture|text)</span>
+                                    <textarea class="bwf-textarea" rows="3" value="@GetLocalizationLines(field.LocalizedHelpTexts)" @onchange="e => SetLocalizationLines(field.LocalizedHelpTexts, e.Value?.ToString())"></textarea>
+                                </label>
+                                <label>
+                                    <span>Localized validation hints (culture|text)</span>
+                                    <textarea class="bwf-textarea" rows="3" value="@GetLocalizationLines(field.LocalizedValidationHints)" @onchange="e => SetLocalizationLines(field.LocalizedValidationHints, e.Value?.ToString())"></textarea>
+                                </label>
                             </div>
 
                             @if (field.Kind is FormFieldKind.Select or FormFieldKind.Radio)
@@ -156,6 +266,10 @@ else
                                 <label>
                                     <span>Options (one per line: value|label)</span>
                                     <textarea class="bwf-textarea" rows="4" value="@GetOptionsText(field)" @onchange="e => SetOptionsText(field, e.Value?.ToString())"></textarea>
+                                </label>
+                                <label>
+                                    <span>Option localizations (culture|value|label)</span>
+                                    <textarea class="bwf-textarea" rows="4" value="@GetOptionLocalizationText(field)" @onchange="e => SetOptionLocalizationText(field, e.Value?.ToString())"></textarea>
                                 </label>
                             }
 
@@ -176,6 +290,25 @@ else
         <aside class="bwf-builder-preview bwf-panel">
             <h3>Live preview</h3>
             <DynamicFormRenderer Definition="State.Form.DraftDefinition" Answers="PreviewAnswers" AnswersChanged="OnPreviewChanged" />
+
+            <section class="bwf-panel" style="margin-top: 1rem;">
+                <h4>Visibility diagnostics</h4>
+                @foreach (var section in State.Form.DraftDefinition.Sections)
+                {
+                    var sectionVisible = IsSectionVisible(section);
+                    <div class="bwf-help">
+                        Section <strong>@section.Title</strong>: @(sectionVisible ? "Visible" : "Hidden")
+                    </div>
+
+                    @foreach (var field in section.Fields)
+                    {
+                        var fieldVisible = IsFieldVisible(field);
+                        <div class="bwf-help" style="margin-left: 1rem;">
+                            Field <strong>@field.Label</strong>: @(fieldVisible ? "Visible" : "Hidden")
+                        </div>
+                    }
+                }
+            </section>
         </aside>
     </div>
 
@@ -377,6 +510,85 @@ else
         }
     }
 
+    private static string GetLocalizationLines(IReadOnlyDictionary<string, string> map)
+    {
+        return string.Join(Environment.NewLine, map.Select(kv => $"{kv.Key}|{kv.Value}"));
+    }
+
+    private static void SetLocalizationLines(Dictionary<string, string> map, string? value)
+    {
+        map.Clear();
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var lines = value.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var line in lines)
+        {
+            var parts = line.Split('|', 2, StringSplitOptions.TrimEntries);
+            if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[0]) || string.IsNullOrWhiteSpace(parts[1]))
+            {
+                continue;
+            }
+
+            map[parts[0]] = parts[1];
+        }
+    }
+
+    private static string GetOptionLocalizationText(FormFieldDefinition field)
+    {
+        var lines = new List<string>();
+        foreach (var option in field.Options)
+        {
+            foreach (var localized in option.LocalizedLabels)
+            {
+                lines.Add($"{localized.Key}|{option.Value}|{localized.Value}");
+            }
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static void SetOptionLocalizationText(FormFieldDefinition field, string? value)
+    {
+        foreach (var option in field.Options)
+        {
+            option.LocalizedLabels.Clear();
+        }
+
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return;
+        }
+
+        var lines = value.Split(["\r\n", "\n"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        foreach (var line in lines)
+        {
+            var parts = line.Split('|', 3, StringSplitOptions.TrimEntries);
+            if (parts.Length != 3)
+            {
+                continue;
+            }
+
+            var culture = parts[0];
+            var optionValue = parts[1];
+            var label = parts[2];
+            if (string.IsNullOrWhiteSpace(culture) || string.IsNullOrWhiteSpace(optionValue) || string.IsNullOrWhiteSpace(label))
+            {
+                continue;
+            }
+
+            var option = field.Options.FirstOrDefault(o => o.Value.Equals(optionValue, StringComparison.OrdinalIgnoreCase));
+            if (option is null)
+            {
+                continue;
+            }
+
+            option.LocalizedLabels[culture] = label;
+        }
+    }
+
     private static IEnumerable<string> GetConditionReferences(string? condition, VisibilityConditionDefinition? rules)
     {
         if (rules is not null)
@@ -447,6 +659,49 @@ else
     {
         field.VisibilityRules ??= new VisibilityConditionDefinition();
         return field.VisibilityRules;
+    }
+
+    private static string GetSectionColumnsValue(FormSectionDefinition section)
+    {
+        var value = section.Layout?.Columns ?? 1;
+        return value.ToString();
+    }
+
+    private static void SetSectionColumns(FormSectionDefinition section, string? value)
+    {
+        section.Layout ??= new FormSectionLayoutDefinition();
+        if (int.TryParse(value, out var parsed))
+        {
+            section.Layout.Columns = parsed;
+        }
+        else
+        {
+            section.Layout.Columns = 1;
+        }
+    }
+
+    private static string GetSectionGroup(FormSectionDefinition section) => section.Layout?.Group ?? string.Empty;
+
+    private static void SetSectionGroup(FormSectionDefinition section, string? value)
+    {
+        section.Layout ??= new FormSectionLayoutDefinition();
+        section.Layout.Group = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
+
+    private static string GetFieldWidthHint(FormFieldDefinition field) => field.Layout?.WidthHint ?? "Auto";
+
+    private static void SetFieldWidthHint(FormFieldDefinition field, string? value)
+    {
+        field.Layout ??= new FormFieldLayoutDefinition();
+        field.Layout.WidthHint = string.IsNullOrWhiteSpace(value) ? "Auto" : value.Trim();
+    }
+
+    private static string GetFieldGroup(FormFieldDefinition field) => field.Layout?.Group ?? string.Empty;
+
+    private static void SetFieldGroup(FormFieldDefinition field, string? value)
+    {
+        field.Layout ??= new FormFieldLayoutDefinition();
+        field.Layout.Group = string.IsNullOrWhiteSpace(value) ? null : value.Trim();
     }
 
     private static VisibilityConditionDefinition ParseRules(VisibilityConditionDefinition rules, string? value)
@@ -554,6 +809,7 @@ else
             Description = State.Form.Description,
             Slug = string.IsNullOrWhiteSpace(State.Form.Publication.Slug) ? State.Form.Key : State.Form.Publication.Slug,
             AccessMode = State.Form.Publication.AccessMode,
+            EditMode = State.Form.Publication.EditMode,
             Definition = State.Form.DraftDefinition,
             NotificationEmails = State.Form.Notifications.Select(x => x.Email).ToList()
         });
@@ -583,5 +839,25 @@ else
         }
 
         return Task.CompletedTask;
+    }
+
+    private bool IsSectionVisible(FormSectionDefinition section)
+    {
+        if (section.VisibilityRules is not null && section.VisibilityRules.Rules.Count > 0)
+        {
+            return ConditionEvaluator.IsVisible(section.VisibilityRules, PreviewAnswers);
+        }
+
+        return ConditionEvaluator.IsVisible(section.VisibilityCondition, PreviewAnswers);
+    }
+
+    private bool IsFieldVisible(FormFieldDefinition field)
+    {
+        if (field.VisibilityRules is not null && field.VisibilityRules.Rules.Count > 0)
+        {
+            return ConditionEvaluator.IsVisible(field.VisibilityRules, PreviewAnswers);
+        }
+
+        return ConditionEvaluator.IsVisible(field.VisibilityCondition, PreviewAnswers);
     }
 }

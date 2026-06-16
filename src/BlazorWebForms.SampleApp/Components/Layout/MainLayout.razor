@@ -1,21 +1,34 @@
 ﻿@inherits LayoutComponentBase
 @inject BlazorWebForms.Core.Abstractions.ICurrentUserContext CurrentUserContext
 @inject NavigationManager Navigation
+@inject AppLocalizer L
+<a class="skip-link" href="#main-content">@L.Get("Layout.SkipToMain")</a>
 <div class="app-shell">
-    <aside class="app-sidebar">
+    <aside class="app-sidebar" aria-label="Primary">
         <NavMenu />
     </aside>
 
-    <main class="app-main">
+    <main id="main-content" class="app-main" tabindex="-1">
         <div class="app-top-row">
-            <span class="app-top-row-title">BlazorWebForms Sample</span>
+            <span class="app-top-row-title">@L.Get("Layout.Title")</span>
             <div class="app-top-row-auth">
+                <form method="get" action="/culture/set" class="app-auth-form app-culture-form" aria-label="@L.Get("Layout.Culture")">
+                    <label class="visually-hidden" for="culture">@L.Get("Layout.Culture")</label>
+                    <input type="hidden" name="returnUrl" value="@LocalReturnUrl" />
+                    <select id="culture" class="app-auth-input" name="culture" @bind="SelectedCulture">
+                        @foreach (var culture in SupportedCultureOptions)
+                        {
+                            <option value="@culture.Value">@culture.Label</option>
+                        }
+                    </select>
+                    <button type="submit" class="app-auth-button">@L.Get("Layout.ApplyCulture")</button>
+                </form>
                 <span class="app-user-pill">@UserSummary</span>
                 @if (CurrentUser.IsAuthenticated)
                 {
                     <form method="post" action="/auth/logout">
                         <input type="hidden" name="returnUrl" value="@LocalReturnUrl" />
-                        <button type="submit" class="app-auth-button">Log out</button>
+                        <button type="submit" class="app-auth-button">@L.Get("Layout.LogOut")</button>
                     </form>
                 }
                 else
@@ -29,10 +42,10 @@
                             <option value="Approver">Approver</option>
                             <option value="Admin">Admin</option>
                         </select>
-                        <button type="submit" class="app-auth-button">Dev login</button>
+                        <button type="submit" class="app-auth-button">@L.Get("Layout.DevLogin")</button>
                     </form>
                 }
-                <a href="https://learn.microsoft.com/aspnet/core/" target="_blank" rel="noopener noreferrer">Docs</a>
+                <a href="https://learn.microsoft.com/aspnet/core/" target="_blank" rel="noopener noreferrer">@L.Get("Layout.Docs")</a>
             </div>
         </div>
 
@@ -47,7 +60,17 @@
 
     private string UserSummary => CurrentUser.IsAuthenticated
         ? $"{CurrentUser.DisplayName} ({string.Join(", ", CurrentUser.Roles)})"
-        : "Anonymous";
+        : L.Get("Layout.UserAnonymous");
+
+    private string SelectedCulture { get; set; } = System.Globalization.CultureInfo.CurrentUICulture.Name;
+
+    private static IReadOnlyList<(string Value, string Label)> SupportedCultureOptions { get; } =
+    [
+        ("en-US", "English (US)"),
+        ("fr-FR", "Francais"),
+        ("es-ES", "Espanol"),
+        ("ar-SA", "Arabic")
+    ];
 
     private string LocalReturnUrl
     {

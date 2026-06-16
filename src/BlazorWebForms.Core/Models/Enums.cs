@@ -36,13 +36,21 @@ public enum EntryStatus
     Draft,
     Submitted,
     NeedsApproval,
-    Approved
+    Approved,
+    Rejected
 }
 
 public enum ApprovalStepStatus
 {
     Pending,
-    Approved
+    Approved,
+    Rejected
+}
+
+public enum SubmissionEditMode
+{
+    ImmutableRevisions,
+    OverwriteLatest
 }
 
 public enum InvitationStatus
@@ -65,4 +73,13 @@ public enum VisibilityRuleOperator
     NotEquals,
     Contains,
     Empty
+}
+
+public enum ApprovalAuditAction
+{
+    StepApproved,
+    StepRejected,
+    Resubmitted,
+    GraphApproverAssigned,
+    GraphApproverReminder
 }

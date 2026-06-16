@@ -30,6 +30,7 @@ public sealed class FormPublication
     public string Domain { get; set; } = string.Empty;
     public FormAccessMode AccessMode { get; set; } = FormAccessMode.Authenticated;
     public bool SendSubmissionCopyToSubmitter { get; set; } = true;
+    public SubmissionEditMode EditMode { get; set; } = SubmissionEditMode.ImmutableRevisions;
 }
 
 public sealed class FormPermissionGrant
@@ -62,6 +63,7 @@ public sealed class EntryRecord
     public List<EntryFileRecord> Files { get; set; } = [];
     public List<EntryRevisionRecord> Revisions { get; set; } = [];
     public List<ApprovalStepRecord> ApprovalSteps { get; set; } = [];
+    public List<ApprovalAuditEvent> ApprovalAuditTrail { get; set; } = [];
 }
 
 public sealed class EntryFileRecord
@@ -72,6 +74,10 @@ public sealed class EntryFileRecord
     public string ContentType { get; set; } = "application/octet-stream";
     public long Length { get; set; }
     public string RelativePath { get; set; } = string.Empty;
+    public string Sha256 { get; set; } = string.Empty;
+    public Guid UploadedByUserId { get; set; }
+    public string UploadedByEmail { get; set; } = string.Empty;
+    public int RevisionNumber { get; set; }
     public DateTimeOffset UploadedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
@@ -84,6 +90,8 @@ public sealed class EntryQueryOptions
     public string? Search { get; set; }
     public string? IndexedFieldId { get; set; }
     public string? IndexedFieldValue { get; set; }
+    public int Offset { get; set; }
+    public int Limit { get; set; }
 }
 
 public sealed class EntryRevisionRecord
@@ -103,7 +111,21 @@ public sealed class ApprovalStepRecord
     public string ApproverEmail { get; set; } = string.Empty;
     public ApprovalStepStatus Status { get; set; } = ApprovalStepStatus.Pending;
     public string? Signature { get; set; }
+    public string? RejectionReason { get; set; }
     public DateTimeOffset? CompletedUtc { get; set; }
+}
+
+public sealed class ApprovalAuditEvent
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public ApprovalAuditAction Action { get; set; }
+    public Guid? ApprovalStepId { get; set; }
+    public Guid ActorUserId { get; set; }
+    public string ActorDisplayName { get; set; } = string.Empty;
+    public string? Signature { get; set; }
+    public string? Reason { get; set; }
+    public string? CorrelationId { get; set; }
+    public DateTimeOffset OccurredUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class StoredFile
@@ -113,6 +135,7 @@ public sealed class StoredFile
     public string ContentType { get; set; } = "application/octet-stream";
     public long Length { get; set; }
     public string RelativePath { get; set; } = string.Empty;
+    public string Sha256 { get; set; } = string.Empty;
 }
 
 public sealed class FileUploadRequest
@@ -120,6 +143,9 @@ public sealed class FileUploadRequest
     public string FileName { get; set; } = string.Empty;
     public string ContentType { get; set; } = "application/octet-stream";
     public byte[] Content { get; set; } = [];
+    public long? MaxAllowedBytes { get; set; }
+    public List<string> AllowedMimeTypes { get; set; } = [];
+    public List<string> AllowedExtensions { get; set; } = [];
 }
 
 public sealed class UserProfile

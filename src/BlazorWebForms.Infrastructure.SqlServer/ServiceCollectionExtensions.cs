@@ -1,4 +1,5 @@
 using BlazorWebForms.Core.Abstractions;
+using BlazorWebForms.Infrastructure.SqlServer.Integrations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -15,13 +16,26 @@ public static class ServiceCollectionExtensions
         configure?.Invoke(options);
 
         services.AddSingleton(options);
+        services.AddHttpClient("BlazorWebForms.Email.SendGrid");
+        services.AddHttpClient("BlazorWebForms.Email.Graph");
         // register EF Core DbContext and EF-backed repository (scoped)
         services.AddDbContext<BlazorWebFormsDbContext>(builder => builder.UseSqlServer(options.ConnectionString));
         services.AddScoped<IFormsRepository, EfFormsRepository>();
 
         services.TryAddSingleton<IFileStorage, LocalFileStorage>();
+        services.TryAddSingleton<DryRunEmailIntegration>();
+        services.TryAddSingleton<SmtpEmailIntegration>();
+        services.TryAddSingleton<SendGridEmailIntegration>();
+        services.TryAddSingleton<GraphEmailIntegration>();
+        services.TryAddSingleton<IEmailIntegration, EmailIntegrationRouter>();
+        services.TryAddSingleton<IGraphIntegration, GraphIntegration>();
+        services.TryAddSingleton<IPdfIntegration, PdfIntegration>();
+        services.TryAddSingleton<IIntegrationGateway, IntegrationGateway>();
+        services.TryAddSingleton<IAntiAbuseGuard, DefaultAntiAbuseGuard>();
+        services.AddSingleton<IOperationalTelemetry, InMemoryOperationalTelemetry>();
         services.TryAddSingleton<IPdfExporter, TextPdfExporter>();
-        services.TryAddSingleton<IEmailNotifier, MemoryEmailNotifier>();
+        services.TryAddScoped<DraftCleanupService>();
+        services.TryAddSingleton<IEmailNotifier, TemplateEmailNotifier>();
         services.TryAddSingleton<ICurrentUserContext, DemoCurrentUserContext>();
         services.TryAddSingleton<SqlServerSchemaDescriptor>();
         return services;

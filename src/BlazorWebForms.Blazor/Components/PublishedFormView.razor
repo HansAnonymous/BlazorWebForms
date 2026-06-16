@@ -1,4 +1,5 @@
 @using BlazorWebForms.Core.Services
+@using System.Globalization
 @inject FormsApplicationService FormsService
 @inject NavigationManager NavigationManager
 
@@ -9,12 +10,24 @@
 else
 {
     <article class="bwf-panel bwf-public-form">
-        <header class="bwf-hero" style="--accent:@ViewModel.Definition.Branding.AccentColor">
+        <header class="bwf-hero" style="@GetBrandingStyle()">
             <div>
                 <p class="bwf-kicker">Published form</p>
-                <h1>@ViewModel.Form.Name</h1>
-                <p>@ViewModel.Form.Description</p>
+                <h1>@GetFormTitle()</h1>
+                <p>@GetFormDescription()</p>
+                @if (!string.IsNullOrWhiteSpace(ViewModel.Definition.Branding.HeroText))
+                {
+                    <p class="bwf-help">@ViewModel.Definition.Branding.HeroText</p>
+                }
             </div>
+            @if (!string.IsNullOrWhiteSpace(GetLogoSource()))
+            {
+                <img class="bwf-brand-logo" src="@GetLogoSource()" alt="Form logo" />
+            }
+            @if (!string.IsNullOrWhiteSpace(GetHeroImageSource()))
+            {
+                <img class="bwf-brand-hero" src="@GetHeroImageSource()" alt="Form hero" />
+            }
             <div class="bwf-meta">
                 <span>v@ViewModel.Version.VersionNumber</span>
                 <span>@ViewModel.Form.Publication.AccessMode</span>
@@ -33,10 +46,29 @@ else
                 </div>
             }
             <div class="bwf-actions">
+                <button class="bwf-button" @onclick="SaveDraftAsync">Save draft</button>
                 <button class="bwf-button" @onclick="AddApprover">Add approver</button>
-                <button class="bwf-button bwf-button-primary" @onclick="SubmitAsync">Submit</button>
+                <button class="bwf-button bwf-button-primary" @onclick="SubmitAsync" disabled="@IsSubmitting">@(IsSubmitting ? "Submitting..." : "Submit")</button>
             </div>
         </section>
+
+        @if (LatestEntry is not null)
+        {
+            <section class="bwf-panel">
+                <h3>Latest submission</h3>
+                <p class="bwf-help">Status: <span class="bwf-badge @GetStatusBadgeClass(LatestEntry.Status)">@LatestEntry.Status</span></p>
+                @if (LatestEntry.Status == EntryStatus.Rejected)
+                {
+                    var reason = LatestEntry.ApprovalSteps
+                        .Where(s => s.Status == ApprovalStepStatus.Rejected)
+                        .OrderByDescending(s => s.CompletedUtc)
+                        .Select(s => s.RejectionReason)
+                        .FirstOrDefault(r => !string.IsNullOrWhiteSpace(r));
+                    <p class="bwf-help">Rejection reason: @(string.IsNullOrWhiteSpace(reason) ? "No reason provided." : reason)</p>
+                    <p class="bwf-help">Next action: update answers and submit again to restart approval.</p>
+                }
+            </section>
+        }
         @if (!string.IsNullOrWhiteSpace(StatusMessage))
         {
             <p class="bwf-status">@StatusMessage</p>
@@ -52,10 +84,40 @@ else
     private List<SubmittedFileInput> Files { get; set; } = [];
     private List<ApproverInput> Approvers { get; } = [new()];
     private string StatusMessage { get; set; } = string.Empty;
+    private Guid? DraftEntryId { get; set; }
+    private EntryRecord? LatestEntry { get; set; }
+    private bool IsSubmitting { get; set; }
 
     protected override async Task OnParametersSetAsync()
     {
         ViewModel = await FormsService.GetPublishedFormAsync(Slug);
+        if (ViewModel is not null)
+        {
+            LatestEntry = await FormsService.GetLatestUserEntryAsync(ViewModel.Form.Id);
+            var draft = await FormsService.GetDraftSubmissionAsync(ViewModel.Form.Id);
+            if (draft is not null)
+            {
+                DraftEntryId = draft.Id;
+                Answers.Clear();
+                foreach (var pair in draft.Answers)
+                {
+                    Answers[pair.Key] = pair.Value;
+                }
+
+                Approvers.Clear();
+                foreach (var step in draft.ApprovalSteps.OrderBy(s => s.Order))
+                {
+                    Approvers.Add(new ApproverInput { Name = step.ApproverName, Email = step.ApproverEmail });
+                }
+
+                if (Approvers.Count == 0)
+                {
+                    Approvers.Add(new ApproverInput());
+                }
+
+                StatusMessage = $"Loaded existing draft {draft.Id}.";
+            }
+        }
     }
 
     private Task OnAnswersChanged(Dictionary<string, string?> answers)
@@ -77,6 +139,69 @@ else
 
     private void AddApprover() => Approvers.Add(new ApproverInput());
 
+    private string GetFormTitle()
+    {
+        if (ViewModel is null)
+        {
+            return string.Empty;
+        }
+
+        return FormLocalizationResolver.ResolveText(
+            ViewModel.Definition.Title,
+            ViewModel.Definition.LocalizedTitles,
+            CultureInfo.CurrentUICulture.Name,
+            ViewModel.Definition.DefaultCulture);
+    }
+
+    private string GetFormDescription()
+    {
+        if (ViewModel is null)
+        {
+            return string.Empty;
+        }
+
+        return FormLocalizationResolver.ResolveText(
+            ViewModel.Definition.Description,
+            ViewModel.Definition.LocalizedDescriptions,
+            CultureInfo.CurrentUICulture.Name,
+            ViewModel.Definition.DefaultCulture);
+    }
+
+    private string GetBrandingStyle()
+    {
+        if (ViewModel is null)
+        {
+            return "--accent:#0f766e;--surface:#ffffff;--text:#124040;--button-radius:999px;";
+        }
+
+        var branding = ViewModel.Definition.Branding;
+        return $"--accent:{branding.AccentColor};--surface:{branding.SurfaceColor};--text:{branding.TextColor};--button-radius:{branding.ButtonRadius};";
+    }
+
+    private string GetLogoSource()
+    {
+        if (ViewModel is null)
+        {
+            return string.Empty;
+        }
+
+        return !string.IsNullOrWhiteSpace(ViewModel.Definition.Branding.LogoUrl)
+            ? ViewModel.Definition.Branding.LogoUrl
+            : ViewModel.Definition.Branding.LogoFileRef;
+    }
+
+    private string GetHeroImageSource()
+    {
+        if (ViewModel is null)
+        {
+            return string.Empty;
+        }
+
+        return !string.IsNullOrWhiteSpace(ViewModel.Definition.Branding.HeroImageUrl)
+            ? ViewModel.Definition.Branding.HeroImageUrl
+            : ViewModel.Definition.Branding.HeroImageFileRef;
+    }
+
     private async Task SubmitAsync()
     {
         if (ViewModel is null)
@@ -84,14 +209,64 @@ else
             return;
         }
 
-        var entry = await FormsService.SubmitEntryAsync(ViewModel.Form.Id, new SubmitEntryRequest
+        if (IsSubmitting)
         {
+            return;
+        }
+
+        IsSubmitting = true;
+        try
+        {
+            var entry = await FormsService.SubmitEntryAsync(ViewModel.Form.Id, new SubmitEntryRequest
+            {
+                DraftEntryId = DraftEntryId,
+                Answers = new Dictionary<string, string?>(Answers, StringComparer.OrdinalIgnoreCase),
+                Approvers = Approvers.Where(x => !string.IsNullOrWhiteSpace(x.Email)).ToList(),
+                Files = Files
+            });
+
+            DraftEntryId = null;
+            LatestEntry = entry;
+            StatusMessage = $"Submitted entry {entry.Id}.";
+            NavigationManager.NavigateTo($"/entries/{entry.Id}");
+        }
+        catch (InvalidOperationException ex)
+        {
+            StatusMessage = ex.Message;
+        }
+        finally
+        {
+            IsSubmitting = false;
+        }
+    }
+
+    private async Task SaveDraftAsync()
+    {
+        if (ViewModel is null)
+        {
+            return;
+        }
+
+        var draft = await FormsService.SaveDraftSubmissionAsync(ViewModel.Form.Id, new SaveDraftSubmissionRequest
+        {
+            DraftEntryId = DraftEntryId,
             Answers = new Dictionary<string, string?>(Answers, StringComparer.OrdinalIgnoreCase),
             Approvers = Approvers.Where(x => !string.IsNullOrWhiteSpace(x.Email)).ToList(),
             Files = Files
         });
 
-        StatusMessage = $"Submitted entry {entry.Id}.";
-        NavigationManager.NavigateTo($"/entries/{entry.Id}");
+        DraftEntryId = draft.Id;
+        LatestEntry = draft;
+        StatusMessage = $"Draft {draft.Id} saved.";
     }
+
+    private static string GetStatusBadgeClass(EntryStatus status) => status switch
+    {
+        EntryStatus.Draft => "bwf-badge-draft",
+        EntryStatus.Submitted => "bwf-badge-submitted",
+        EntryStatus.NeedsApproval => "bwf-badge-review",
+        EntryStatus.Approved => "bwf-badge-approved",
+        EntryStatus.Rejected => "bwf-badge-rejected",
+        _ => "bwf-badge-submitted"
+    };
 }

@@ -23,19 +23,27 @@ else
             </div>
         </div>
         <div class="hero-side">
-            <div class="metric-card">
+            <div class="metric-card" aria-label="Total forms metric">
                 <span>Forms</span>
                 <strong>@Dashboard.Forms.Count</strong>
             </div>
-            <div class="metric-card">
+            <div class="metric-card" aria-label="Recent entries metric">
                 <span>Recent entries</span>
                 <strong>@Dashboard.RecentEntries.Count</strong>
             </div>
-            <div class="metric-card">
+            <div class="metric-card" aria-label="Needs approval metric">
                 <span>Needs approval</span>
                 <strong>@Dashboard.RecentEntries.Count(entry => entry.Status == EntryStatus.NeedsApproval)</strong>
             </div>
-            <div class="metric-card">
+            <div class="metric-card" aria-label="Rejected entries metric">
+                <span>Rejected</span>
+                <strong>@Dashboard.RecentEntries.Count(entry => entry.Status == EntryStatus.Rejected)</strong>
+            </div>
+            <div class="metric-card" aria-label="Draft entries metric">
+                <span>Draft</span>
+                <strong>@Dashboard.RecentEntries.Count(entry => entry.Status == EntryStatus.Draft)</strong>
+            </div>
+            <div class="metric-card" aria-label="Demo route metric">
                 <span>Demo route</span>
                 <strong>/forms/expense-approval</strong>
             </div>
@@ -52,14 +60,17 @@ else
     }
 
     <section class="bwf-panel">
-        <p class="bwf-kicker">Milestone 1 implemented</p>
-        <h2>What this sample demonstrates right now</h2>
+        <p class="bwf-kicker">Milestones 2-6 implemented</p>
+        <h2>What this sample demonstrates now</h2>
         <ul class="feature-list">
-            <li>EF Core migrations + SQL Server/Azure SQL persistence for forms, entries, versions, approvals, files, and search index.</li>
-            <li>Immutable publish snapshots with entry details rendered from the exact submitted version.</li>
-            <li>Admin query filters by status, indexed fields, and text search (server-side query path).</li>
-            <li>Submission revisions and approval progression stored as auditable history.</li>
-            <li>File uploads written to storage with entry-linked metadata persisted in SQL.</li>
+            <li>Claims-based auth + policy-guarded routes with role-based builder/admin access and submitter/self-view rules.</li>
+            <li>Builder supports structured conditions, layout hints, localization maps, and branding tokens with publish-time validation.</li>
+            <li>Submission workflow supports draft save/resume/finalize, immutable revisions, rejection/resubmission, reminders, and audit trail.</li>
+            <li>Files pipeline supports per-field constraints, multi-file uploads, signed downloads, and persisted hash/uploader/revision metadata.</li>
+            <li>Entry PDF export includes localized form content, files, approval steps, and approval audit details.</li>
+            <li>Email strategy supports dry-run/SMTP/SendGrid/Graph with retry, idempotency, and anti-abuse checks.</li>
+            <li>Accessibility and i18n include semantic ARIA wiring, keyboard/focus improvements, culture switch, and RTL-aware rendering.</li>
+            <li>Polish/performance includes paged admin queries, metadata caching, responsive states, timeout guardrails, and regression checks.</li>
         </ul>
     </section>
 

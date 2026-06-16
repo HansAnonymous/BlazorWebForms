@@ -1,106 +1,156 @@
 @using BlazorWebForms.Core.Abstractions
 @using BlazorWebForms.Core.Models
+@using System.Globalization
 @inject FormsApplicationService FormsService
 @inject IConditionEvaluator ConditionEvaluator
 
-<div class="bwf-form">
+<div class="bwf-form" role="form" aria-label="Dynamic form">
+    @if (HasUploadErrors)
+    {
+        <section class="bwf-panel" role="alert" aria-live="assertive" tabindex="-1" @ref="uploadErrorSummaryRef">
+            <h3>Upload issues</h3>
+            <ul>
+                @foreach (var kv in uploadErrorsByField.OrderBy(x => x.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    <li><a href="#@kv.Key">@GetFieldLabel(kv.Key): @kv.Value</a></li>
+                }
+            </ul>
+        </section>
+    }
+
     @foreach (var formSection in Definition.Sections.Where(IsSectionVisible))
     {
-        <section class="bwf-section">
+        <section class="bwf-section bwf-section-columns-@GetSectionColumns(formSection)">
             <header class="bwf-section-header">
-                <h3>@formSection.Title</h3>
-                @if (!string.IsNullOrWhiteSpace(formSection.Description))
+                <h3>@GetSectionTitle(formSection)</h3>
+                @if (!string.IsNullOrWhiteSpace(GetSectionDescription(formSection)))
                 {
-                    <p>@formSection.Description</p>
+                    <p>@GetSectionDescription(formSection)</p>
                 }
             </header>
 
-            @foreach (var field in formSection.Fields.Where(IsFieldVisible))
-            {
-                <div class="bwf-field">
-                    <label class="bwf-label" for="@field.Id">@field.Label @(field.Required ? "*" : string.Empty)</label>
-                    @switch (field.Kind)
-                    {
-                        case FormFieldKind.Text:
-                        case FormFieldKind.Number:
-                        case FormFieldKind.Date:
-                            <input id="@field.Id"
-                                   class="bwf-input"
-                                   type="@GetInputType(field.Kind)"
-                                   value="@GetValue(field.Id)"
-                                   placeholder="@field.Placeholder"
-                                   disabled="@ReadOnly"
-                                   @oninput="e => UpdateValue(field.Id, e.Value?.ToString())" />
-                            break;
-                        case FormFieldKind.TextArea:
-                        case FormFieldKind.RichText:
-                            <textarea id="@field.Id"
-                                      class="bwf-textarea"
-                                      rows="4"
-                                      placeholder="@field.Placeholder"
-                                      disabled="@ReadOnly"
-                                      @oninput="e => UpdateValue(field.Id, e.Value?.ToString())">@GetValue(field.Id)</textarea>
-                            break;
-                        case FormFieldKind.Checkbox:
-                            <input id="@field.Id"
-                                   type="checkbox"
-                                   checked="@string.Equals(GetValue(field.Id), "true", StringComparison.OrdinalIgnoreCase)"
-                                   disabled="@ReadOnly"
-                                   @onchange="e => UpdateValue(field.Id, e.Value?.ToString())" />
-                            break;
-                        case FormFieldKind.Select:
-                            <select id="@field.Id"
-                                    class="bwf-input"
-                                    disabled="@ReadOnly"
-                                    value="@GetValue(field.Id)"
-                                    @onchange="e => UpdateValue(field.Id, e.Value?.ToString())">
-                                <option value="">Select...</option>
-                                @foreach (var option in field.Options)
+            <div class="bwf-section-fields">
+                @foreach (var field in formSection.Fields.Where(IsFieldVisible))
+                {
+                    <div class="bwf-field @GetFieldWidthCssClass(field)">
+                        <label id="@GetLabelId(field.Id)" class="bwf-label" for="@field.Id">@GetFieldLabel(field) @(field.Required ? "*" : string.Empty)</label>
+                        @switch (field.Kind)
+                        {
+                            case FormFieldKind.Text:
+                            case FormFieldKind.Number:
+                            case FormFieldKind.Date:
+                                <input id="@field.Id"
+                                       class="bwf-input"
+                                       type="@GetInputType(field.Kind)"
+                                       value="@GetValue(field.Id)"
+                                       placeholder="@GetFieldPlaceholder(field)"
+                                       aria-invalid="@HasFieldError(field.Id)"
+                                       aria-required="@field.Required"
+                                       aria-describedby="@GetAriaDescribedBy(field)"
+                                       disabled="@ReadOnly"
+                                       @oninput="e => UpdateValue(field.Id, e.Value?.ToString())" />
+                                break;
+                            case FormFieldKind.TextArea:
+                            case FormFieldKind.RichText:
+                                <textarea id="@field.Id"
+                                          class="bwf-textarea"
+                                          rows="4"
+                                          placeholder="@GetFieldPlaceholder(field)"
+                                          aria-invalid="@HasFieldError(field.Id)"
+                                          aria-required="@field.Required"
+                                          aria-describedby="@GetAriaDescribedBy(field)"
+                                          disabled="@ReadOnly"
+                                          @oninput="e => UpdateValue(field.Id, e.Value?.ToString())">@GetValue(field.Id)</textarea>
+                                break;
+                            case FormFieldKind.Checkbox:
+                                <input id="@field.Id"
+                                       type="checkbox"
+                                       checked="@string.Equals(GetValue(field.Id), "true", StringComparison.OrdinalIgnoreCase)"
+                                       aria-describedby="@GetAriaDescribedBy(field)"
+                                       disabled="@ReadOnly"
+                                       @onchange="e => UpdateValue(field.Id, e.Value?.ToString())" />
+                                break;
+                            case FormFieldKind.Select:
+                                <select id="@field.Id"
+                                        class="bwf-input"
+                                        disabled="@ReadOnly"
+                                        value="@GetValue(field.Id)"
+                                        aria-invalid="@HasFieldError(field.Id)"
+                                        aria-required="@field.Required"
+                                        aria-describedby="@GetAriaDescribedBy(field)"
+                                        @onchange="e => UpdateValue(field.Id, e.Value?.ToString())">
+                                    <option value="">Select...</option>
+                                    @foreach (var option in field.Options)
+                                    {
+                                        <option value="@option.Value">@GetOptionLabel(option)</option>
+                                    }
+                                </select>
+                                break;
+                            case FormFieldKind.Radio:
+                                <div class="bwf-radio-group" role="radiogroup" aria-labelledby="@GetLabelId(field.Id)" aria-describedby="@GetAriaDescribedBy(field)">
+                                    @foreach (var option in field.Options)
+                                    {
+                                        <label class="bwf-radio">
+                                            <input type="radio"
+                                                   name="@field.Id"
+                                                   value="@option.Value"
+                                                   checked="@string.Equals(GetValue(field.Id), option.Value, StringComparison.OrdinalIgnoreCase)"
+                                                   disabled="@ReadOnly"
+                                                   @onchange="e => UpdateValue(field.Id, e.Value?.ToString())" />
+                                            <span>@GetOptionLabel(option)</span>
+                                        </label>
+                                    }
+                                </div>
+                                break;
+                            case FormFieldKind.File:
+                                <InputFile OnChange="e => OnFileChanged(field.Id, e)" disabled="@ReadOnly" multiple="@(GetMaxFileCount(field) > 1)" aria-describedby="@GetAriaDescribedBy(field)" aria-invalid="@HasFieldError(field.Id)" />
+                                @if (TryGetFileConstraints(field, out var constraints))
                                 {
-                                    <option value="@option.Value">@option.Label</option>
+                                    <div class="bwf-help" id="@GetConstraintId(field.Id)">@constraints</div>
                                 }
-                            </select>
-                            break;
-                        case FormFieldKind.Radio:
-                            <div class="bwf-radio-group">
-                                @foreach (var option in field.Options)
+                                @if (IsUploading(field.Id))
                                 {
-                                    <label class="bwf-radio">
-                                        <input type="radio"
-                                               name="@field.Id"
-                                               value="@option.Value"
-                                               checked="@string.Equals(GetValue(field.Id), option.Value, StringComparison.OrdinalIgnoreCase)"
-                                               disabled="@ReadOnly"
-                                               @onchange="e => UpdateValue(field.Id, e.Value?.ToString())" />
-                                        <span>@option.Label</span>
-                                    </label>
+                                    <div class="bwf-help" id="@GetUploadStateId(field.Id)" role="status" aria-live="polite">Uploading...</div>
                                 }
-                            </div>
-                            break;
-                        case FormFieldKind.File:
-                            <InputFile OnChange="e => OnFileChanged(field.Id, e)" disabled="@ReadOnly" />
-                            @if (!string.IsNullOrWhiteSpace(GetValue(field.Id)))
-                            {
-                                <div class="bwf-help">Uploaded: @GetValue(field.Id)</div>
-                            }
-                            break;
-                        case FormFieldKind.Signature:
-                            <input id="@field.Id"
-                                   class="bwf-input"
-                                   type="text"
-                                   value="@GetValue(field.Id)"
-                                   placeholder="Type signer name"
-                                   disabled="@ReadOnly"
-                                   @oninput="e => UpdateValue(field.Id, e.Value?.ToString())" />
-                            break;
-                    }
+                                @if (TryGetUploadError(field.Id, out var uploadError))
+                                {
+                                    <div class="bwf-help" id="@GetErrorId(field.Id)" role="alert">Upload failed: @uploadError</div>
+                                }
+                                @if (TryGetUploadedFileNames(field.Id, out var uploadedNames))
+                                {
+                                    <div class="bwf-help">Uploaded: @uploadedNames</div>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(GetValue(field.Id)))
+                                {
+                                    <div class="bwf-help">Uploaded: @GetValue(field.Id)</div>
+                                }
+                                break;
+                            case FormFieldKind.Signature:
+                                <input id="@field.Id"
+                                       class="bwf-input"
+                                       type="text"
+                                       value="@GetValue(field.Id)"
+                                       placeholder="Type signer name"
+                                       aria-invalid="@HasFieldError(field.Id)"
+                                       aria-required="@field.Required"
+                                       aria-describedby="@GetAriaDescribedBy(field)"
+                                       disabled="@ReadOnly"
+                                       @oninput="e => UpdateValue(field.Id, e.Value?.ToString())" />
+                                break;
+                        }
 
-                    @if (!string.IsNullOrWhiteSpace(field.HelpText))
-                    {
-                        <div class="bwf-help">@field.HelpText</div>
-                    }
-                </div>
-            }
+                        @if (!string.IsNullOrWhiteSpace(GetFieldHelpText(field)))
+                        {
+                            <div class="bwf-help" id="@GetHelpId(field.Id)">@GetFieldHelpText(field)</div>
+                        }
+
+                        @if (!string.IsNullOrWhiteSpace(GetFieldValidationHint(field)))
+                        {
+                            <div class="bwf-help" id="@GetHintId(field.Id)">Hint: @GetFieldValidationHint(field)</div>
+                        }
+                    </div>
+                }
+            </div>
         </section>
     }
 </div>
@@ -108,11 +158,17 @@
 @code {
     [Parameter, EditorRequired] public required FormDefinition Definition { get; set; }
     [Parameter, EditorRequired] public required Dictionary<string, string?> Answers { get; set; }
+    [Parameter] public string? Culture { get; set; }
     [Parameter] public bool ReadOnly { get; set; }
     [Parameter] public EventCallback<Dictionary<string, string?>> AnswersChanged { get; set; }
     [Parameter] public EventCallback<List<SubmittedFileInput>> FilesChanged { get; set; }
 
-    private readonly Dictionary<string, SubmittedFileInput> uploadedFilesByField = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, List<SubmittedFileInput>> uploadedFilesByField = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<string> uploadingFields = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> uploadErrorsByField = new(StringComparer.OrdinalIgnoreCase);
+    private ElementReference uploadErrorSummaryRef;
+    private bool focusUploadErrorSummary;
+    private const long DefaultMaxUploadBytes = 10 * 1024 * 1024;
 
     private string? GetValue(string fieldId) =>
         Answers.TryGetValue(fieldId, out var value) ? value : null;
@@ -137,33 +193,218 @@
             return;
         }
 
-        var file = args.File;
-        if (file is null)
+        var field = Definition.Sections
+            .SelectMany(s => s.Fields)
+            .FirstOrDefault(f => string.Equals(f.Id, fieldId, StringComparison.OrdinalIgnoreCase));
+        if (field is null)
         {
-            return;
+            throw new InvalidOperationException("Upload field configuration is missing.");
         }
 
-        await using var stream = file.OpenReadStream(maxAllowedSize: 10 * 1024 * 1024);
-        using var memory = new MemoryStream();
-        await stream.CopyToAsync(memory);
+        var maxFiles = GetMaxFileCount(field);
+        var selectedFiles = args.GetMultipleFiles(maxFiles);
+        var existingFiles = uploadedFilesByField.TryGetValue(fieldId, out var existing)
+            ? existing
+            : [];
 
-        var stored = await FormsService.StoreFileAsync(new FileUploadRequest
+        if (maxFiles == 1)
         {
-            FileName = file.Name,
-            ContentType = file.ContentType,
-            Content = memory.ToArray()
-        });
-
-        uploadedFilesByField[fieldId] = new SubmittedFileInput
+            existingFiles.Clear();
+        }
+        else if (existingFiles.Count + selectedFiles.Count > maxFiles)
         {
-            FieldId = fieldId,
-            File = stored
-        };
+            throw new InvalidOperationException($"Field '{field.Label}' allows at most {maxFiles} files.");
+        }
 
-        await FilesChanged.InvokeAsync(uploadedFilesByField.Values.ToList());
-        Answers[fieldId] = stored.FileName;
-        await AnswersChanged.InvokeAsync(Answers);
+        uploadingFields.Add(fieldId);
+        uploadErrorsByField.Remove(fieldId);
+
+        try
+        {
+            foreach (var file in selectedFiles)
+            {
+                var maxAllowedBytes = ValidateFileAgainstFieldConstraints(file, field);
+                await using var stream = file.OpenReadStream(maxAllowedSize: maxAllowedBytes);
+                using var memory = new MemoryStream();
+                await stream.CopyToAsync(memory);
+
+                var stored = await FormsService.StoreFileAsync(new FileUploadRequest
+                {
+                    FileName = file.Name,
+                    ContentType = file.ContentType,
+                    Content = memory.ToArray(),
+                    MaxAllowedBytes = maxAllowedBytes,
+                    AllowedExtensions = field.AllowedExtensions,
+                    AllowedMimeTypes = field.AllowedMimeTypes
+                });
+
+                existingFiles.Add(new SubmittedFileInput
+                {
+                    FieldId = fieldId,
+                    File = stored
+                });
+            }
+
+            uploadedFilesByField[fieldId] = existingFiles;
+
+            var flattenedFiles = uploadedFilesByField.Values.SelectMany(v => v).ToList();
+            await FilesChanged.InvokeAsync(flattenedFiles);
+            Answers[fieldId] = string.Join(", ", existingFiles.Select(f => f.File.FileName));
+            await AnswersChanged.InvokeAsync(Answers);
+        }
+        catch (Exception ex)
+        {
+            uploadErrorsByField[fieldId] = ex.Message;
+            focusUploadErrorSummary = true;
+        }
+        finally
+        {
+            uploadingFields.Remove(fieldId);
+        }
     }
+
+    private bool IsUploading(string fieldId) => uploadingFields.Contains(fieldId);
+
+    private bool TryGetUploadError(string fieldId, out string error) =>
+        uploadErrorsByField.TryGetValue(fieldId, out error!);
+
+    private bool HasUploadErrors => uploadErrorsByField.Count > 0;
+
+    private bool HasFieldError(string fieldId) => uploadErrorsByField.ContainsKey(fieldId);
+
+    private string GetLabelId(string fieldId) => $"{fieldId}-label";
+    private string GetHelpId(string fieldId) => $"{fieldId}-help";
+    private string GetHintId(string fieldId) => $"{fieldId}-hint";
+    private string GetConstraintId(string fieldId) => $"{fieldId}-constraints";
+    private string GetUploadStateId(string fieldId) => $"{fieldId}-uploading";
+    private string GetErrorId(string fieldId) => $"{fieldId}-error";
+
+    private string GetAriaDescribedBy(FormFieldDefinition field)
+    {
+        var ids = new List<string>();
+        if (!string.IsNullOrWhiteSpace(GetFieldHelpText(field)))
+        {
+            ids.Add(GetHelpId(field.Id));
+        }
+
+        if (!string.IsNullOrWhiteSpace(GetFieldValidationHint(field)))
+        {
+            ids.Add(GetHintId(field.Id));
+        }
+
+        if (field.Kind == FormFieldKind.File)
+        {
+            if (TryGetFileConstraints(field, out _))
+            {
+                ids.Add(GetConstraintId(field.Id));
+            }
+
+            if (IsUploading(field.Id))
+            {
+                ids.Add(GetUploadStateId(field.Id));
+            }
+        }
+
+        if (HasFieldError(field.Id))
+        {
+            ids.Add(GetErrorId(field.Id));
+        }
+
+        return string.Join(' ', ids);
+    }
+
+    private string GetFieldLabel(string fieldId)
+    {
+        var field = Definition.Sections.SelectMany(s => s.Fields)
+            .FirstOrDefault(f => string.Equals(f.Id, fieldId, StringComparison.OrdinalIgnoreCase));
+        return field is null ? fieldId : GetFieldLabel(field);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (focusUploadErrorSummary)
+        {
+            focusUploadErrorSummary = false;
+            await uploadErrorSummaryRef.FocusAsync();
+        }
+    }
+
+    private bool TryGetUploadedFileNames(string fieldId, out string fileNames)
+    {
+        if (uploadedFilesByField.TryGetValue(fieldId, out var files) && files.Count > 0)
+        {
+            fileNames = string.Join(", ", files.Select(f => f.File.FileName));
+            return true;
+        }
+
+        fileNames = string.Empty;
+        return false;
+    }
+
+    private static long ValidateFileAgainstFieldConstraints(IBrowserFile file, FormFieldDefinition field)
+    {
+        var maxSize = field.MaxFileSizeBytes ?? DefaultMaxUploadBytes;
+        if (file.Size > maxSize)
+        {
+            throw new InvalidOperationException($"File '{file.Name}' exceeds max size of {maxSize} bytes.");
+        }
+
+        var extension = Path.GetExtension(file.Name)?.ToLowerInvariant() ?? string.Empty;
+        if (field.AllowedExtensions.Count > 0 && !field.AllowedExtensions.Any(e => string.Equals(NormalizeExtension(e), extension, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException($"File extension '{extension}' is not allowed for field '{field.Label}'.");
+        }
+
+        var contentType = file.ContentType?.Trim().ToLowerInvariant() ?? string.Empty;
+        if (field.AllowedMimeTypes.Count > 0 && !field.AllowedMimeTypes.Any(m => string.Equals(m.Trim().ToLowerInvariant(), contentType, StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException($"File content type '{contentType}' is not allowed for field '{field.Label}'.");
+        }
+
+        return maxSize;
+    }
+
+    private static string NormalizeExtension(string value)
+    {
+        var trimmed = value.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return string.Empty;
+        }
+
+        return trimmed.StartsWith('.') ? trimmed : $".{trimmed}";
+    }
+
+    private static bool TryGetFileConstraints(FormFieldDefinition field, out string constraints)
+    {
+        var parts = new List<string>();
+        if (field.MaxFileSizeBytes.HasValue)
+        {
+            parts.Add($"max {field.MaxFileSizeBytes.Value} bytes");
+        }
+        else
+        {
+            parts.Add($"max {DefaultMaxUploadBytes} bytes");
+        }
+
+        parts.Add($"max files {(field.MaxFileCount <= 0 ? 1 : field.MaxFileCount)}");
+
+        if (field.AllowedExtensions.Count > 0)
+        {
+            parts.Add($"extensions: {string.Join(", ", field.AllowedExtensions)}");
+        }
+
+        if (field.AllowedMimeTypes.Count > 0)
+        {
+            parts.Add($"types: {string.Join(", ", field.AllowedMimeTypes)}");
+        }
+
+        constraints = string.Join(" | ", parts);
+        return parts.Count > 0;
+    }
+
+    private static int GetMaxFileCount(FormFieldDefinition field) =>
+        field.MaxFileCount <= 0 ? 1 : field.MaxFileCount;
 
     private bool IsSectionVisible(FormSectionDefinition section)
     {
@@ -183,5 +424,45 @@
         }
 
         return ConditionEvaluator.IsVisible(field.VisibilityCondition, Answers);
+    }
+
+    private static int GetSectionColumns(FormSectionDefinition section) =>
+        FormLayoutResolver.ResolveSectionColumns(section);
+
+    private string EffectiveCulture => string.IsNullOrWhiteSpace(Culture)
+        ? CultureInfo.CurrentUICulture.Name
+        : Culture!;
+
+    private string GetSectionTitle(FormSectionDefinition section) =>
+        FormLocalizationResolver.ResolveText(section.Title, section.LocalizedTitles, EffectiveCulture, Definition.DefaultCulture);
+
+    private string GetSectionDescription(FormSectionDefinition section) =>
+        FormLocalizationResolver.ResolveText(section.Description, section.LocalizedDescriptions, EffectiveCulture, Definition.DefaultCulture);
+
+    private string GetFieldLabel(FormFieldDefinition field) =>
+        FormLocalizationResolver.ResolveText(field.Label, field.LocalizedLabels, EffectiveCulture, Definition.DefaultCulture);
+
+    private string GetFieldPlaceholder(FormFieldDefinition field) =>
+        FormLocalizationResolver.ResolveText(field.Placeholder, field.LocalizedPlaceholders, EffectiveCulture, Definition.DefaultCulture);
+
+    private string GetFieldHelpText(FormFieldDefinition field) =>
+        FormLocalizationResolver.ResolveText(field.HelpText, field.LocalizedHelpTexts, EffectiveCulture, Definition.DefaultCulture);
+
+    private string GetFieldValidationHint(FormFieldDefinition field) =>
+        FormLocalizationResolver.ResolveText(field.ValidationHint ?? string.Empty, field.LocalizedValidationHints, EffectiveCulture, Definition.DefaultCulture);
+
+    private string GetOptionLabel(FormFieldOption option) =>
+        FormLocalizationResolver.ResolveText(option.Label, option.LocalizedLabels, EffectiveCulture, Definition.DefaultCulture);
+
+    private static string GetFieldWidthCssClass(FormFieldDefinition field)
+    {
+        return FormLayoutResolver.ResolveFieldWidthHint(field) switch
+        {
+            "Half" => "bwf-field-half",
+            "Full" => "bwf-field-full",
+            "Third" => "bwf-field-third",
+            "TwoThirds" => "bwf-field-two-thirds",
+            _ => "bwf-field-auto"
+        };
     }
 }

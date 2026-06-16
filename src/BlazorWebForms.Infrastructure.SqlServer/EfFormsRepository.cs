@@ -132,7 +132,8 @@ internal sealed class EfFormsRepository : IFormsRepository
             {
                 Slug = "expense-approval",
                 AccessMode = FormAccessMode.Public,
-                Domain = "demo.local"
+                Domain = "demo.local",
+                EditMode = SubmissionEditMode.ImmutableRevisions
             },
             Permissions =
             [
@@ -177,7 +178,8 @@ internal sealed class EfFormsRepository : IFormsRepository
             PublicationSlug = form.Publication.Slug,
             PublicationDomain = form.Publication.Domain,
             PublicationAccessMode = (int)form.Publication.AccessMode,
-            PublicationSendSubmissionCopyToSubmitter = form.Publication.SendSubmissionCopyToSubmitter
+            PublicationSendSubmissionCopyToSubmitter = form.Publication.SendSubmissionCopyToSubmitter,
+            PublicationEditMode = (int)form.Publication.EditMode
         };
 
         foreach (var v in form.Versions)
@@ -296,6 +298,10 @@ internal sealed class EfFormsRepository : IFormsRepository
                     [ContentType] NVARCHAR(128) NOT NULL,
                     [Length] BIGINT NOT NULL,
                     [RelativePath] NVARCHAR(512) NOT NULL,
+                    [Sha256] NVARCHAR(64) NOT NULL CONSTRAINT [DF_EntryFiles_Sha256] DEFAULT N'',
+                    [UploadedByUserId] UNIQUEIDENTIFIER NOT NULL CONSTRAINT [DF_EntryFiles_UploadedByUserId] DEFAULT ('00000000-0000-0000-0000-000000000000'),
+                    [UploadedByEmail] NVARCHAR(256) NOT NULL CONSTRAINT [DF_EntryFiles_UploadedByEmail] DEFAULT N'',
+                    [RevisionNumber] INT NOT NULL CONSTRAINT [DF_EntryFiles_RevisionNumber] DEFAULT (1),
                     [UploadedUtc] DATETIMEOFFSET NOT NULL,
                     CONSTRAINT [PK_EntryFiles] PRIMARY KEY ([Id]),
                     CONSTRAINT [FK_EntryFiles_Entries_EntryId] FOREIGN KEY ([EntryId]) REFERENCES [Entries]([Id]) ON DELETE CASCADE
@@ -303,6 +309,49 @@ internal sealed class EfFormsRepository : IFormsRepository
 
                 CREATE INDEX [IX_EntryFiles_EntryId] ON [EntryFiles] ([EntryId]);
                 CREATE INDEX [IX_EntryFiles_EntryId_FieldId] ON [EntryFiles] ([EntryId], [FieldId]);
+                CREATE UNIQUE INDEX [IX_EntryFiles_RelativePath] ON [EntryFiles] ([RelativePath]);
+            END;
+
+            IF OBJECT_ID(N'EntryFiles', N'U') IS NOT NULL
+               AND COL_LENGTH(N'EntryFiles', N'Sha256') IS NULL
+            BEGIN
+                ALTER TABLE [EntryFiles]
+                ADD [Sha256] NVARCHAR(64) NOT NULL
+                    CONSTRAINT [DF_EntryFiles_Sha256] DEFAULT N'';
+            END;
+
+            IF OBJECT_ID(N'EntryFiles', N'U') IS NOT NULL
+               AND COL_LENGTH(N'EntryFiles', N'UploadedByUserId') IS NULL
+            BEGIN
+                ALTER TABLE [EntryFiles]
+                ADD [UploadedByUserId] UNIQUEIDENTIFIER NOT NULL
+                    CONSTRAINT [DF_EntryFiles_UploadedByUserId] DEFAULT ('00000000-0000-0000-0000-000000000000');
+            END;
+
+            IF OBJECT_ID(N'EntryFiles', N'U') IS NOT NULL
+               AND COL_LENGTH(N'EntryFiles', N'UploadedByEmail') IS NULL
+            BEGIN
+                ALTER TABLE [EntryFiles]
+                ADD [UploadedByEmail] NVARCHAR(256) NOT NULL
+                    CONSTRAINT [DF_EntryFiles_UploadedByEmail] DEFAULT N'';
+            END;
+
+            IF OBJECT_ID(N'EntryFiles', N'U') IS NOT NULL
+               AND COL_LENGTH(N'EntryFiles', N'RevisionNumber') IS NULL
+            BEGIN
+                ALTER TABLE [EntryFiles]
+                ADD [RevisionNumber] INT NOT NULL
+                    CONSTRAINT [DF_EntryFiles_RevisionNumber] DEFAULT (1);
+            END;
+
+            IF OBJECT_ID(N'EntryFiles', N'U') IS NOT NULL
+               AND NOT EXISTS (
+                    SELECT 1
+                    FROM sys.indexes
+                    WHERE name = N'IX_EntryFiles_RelativePath'
+                      AND object_id = OBJECT_ID(N'EntryFiles', N'U'))
+            BEGIN
+                CREATE UNIQUE INDEX [IX_EntryFiles_RelativePath] ON [EntryFiles] ([RelativePath]);
             END;
 
             IF OBJECT_ID(N'FormPermissions', N'U') IS NOT NULL
@@ -371,6 +420,72 @@ internal sealed class EfFormsRepository : IFormsRepository
                 CREATE UNIQUE INDEX [IX_FormInvitations_Token] ON [FormInvitations] ([Token]);
                 CREATE INDEX [IX_FormInvitations_FormId_Email_Status] ON [FormInvitations] ([FormId], [Email], [Status]);
             END;
+
+            IF OBJECT_ID(N'ApprovalSteps', N'U') IS NOT NULL
+               AND COL_LENGTH(N'ApprovalSteps', N'RejectionReason') IS NULL
+            BEGIN
+                ALTER TABLE [ApprovalSteps]
+                ADD [RejectionReason] NVARCHAR(2000) NULL;
+            END;
+
+            IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Forms', N'PublicationEditMode') IS NULL
+            BEGIN
+                ALTER TABLE [Forms]
+                ADD [PublicationEditMode] INT NOT NULL
+                    CONSTRAINT [DF_Forms_PublicationEditMode] DEFAULT (0);
+            END;
+
+            IF OBJECT_ID(N'Entries', N'U') IS NOT NULL
+               AND NOT EXISTS (
+                    SELECT 1
+                    FROM sys.indexes
+                    WHERE name = N'IX_Entries_FormId_Status_SubmittedByEmail_SubmittedUtc'
+                      AND object_id = OBJECT_ID(N'Entries', N'U'))
+            BEGIN
+                CREATE INDEX [IX_Entries_FormId_Status_SubmittedByEmail_SubmittedUtc]
+                    ON [Entries] ([FormId], [Status], [SubmittedByEmail], [SubmittedUtc]);
+            END;
+
+            IF OBJECT_ID(N'ApprovalAuditEvents', N'U') IS NULL
+               AND OBJECT_ID(N'Entries', N'U') IS NOT NULL
+            BEGIN
+                CREATE TABLE [ApprovalAuditEvents] (
+                    [Id] UNIQUEIDENTIFIER NOT NULL,
+                    [EntryId] UNIQUEIDENTIFIER NOT NULL,
+                    [Action] INT NOT NULL,
+                    [ApprovalStepId] UNIQUEIDENTIFIER NULL,
+                    [ActorUserId] UNIQUEIDENTIFIER NOT NULL,
+                    [ActorDisplayName] NVARCHAR(256) NOT NULL,
+                    [Signature] NVARCHAR(1024) NULL,
+                    [Reason] NVARCHAR(2000) NULL,
+                    [CorrelationId] NVARCHAR(128) NULL,
+                    [OccurredUtc] DATETIMEOFFSET NOT NULL,
+                    CONSTRAINT [PK_ApprovalAuditEvents] PRIMARY KEY ([Id]),
+                    CONSTRAINT [FK_ApprovalAuditEvents_Entries_EntryId] FOREIGN KEY ([EntryId]) REFERENCES [Entries]([Id]) ON DELETE CASCADE
+                );
+
+                CREATE INDEX [IX_ApprovalAuditEvents_EntryId_OccurredUtc] ON [ApprovalAuditEvents] ([EntryId], [OccurredUtc]);
+                CREATE INDEX [IX_ApprovalAuditEvents_EntryId_Action] ON [ApprovalAuditEvents] ([EntryId], [Action]);
+                CREATE INDEX [IX_ApprovalAuditEvents_CorrelationId] ON [ApprovalAuditEvents] ([CorrelationId]);
+            END;
+
+            IF OBJECT_ID(N'ApprovalAuditEvents', N'U') IS NOT NULL
+               AND COL_LENGTH(N'ApprovalAuditEvents', N'CorrelationId') IS NULL
+            BEGIN
+                ALTER TABLE [ApprovalAuditEvents]
+                ADD [CorrelationId] NVARCHAR(128) NULL;
+            END;
+
+            IF OBJECT_ID(N'ApprovalAuditEvents', N'U') IS NOT NULL
+               AND NOT EXISTS (
+                    SELECT 1
+                    FROM sys.indexes
+                    WHERE name = N'IX_ApprovalAuditEvents_CorrelationId'
+                      AND object_id = OBJECT_ID(N'ApprovalAuditEvents', N'U'))
+            BEGIN
+                CREATE INDEX [IX_ApprovalAuditEvents_CorrelationId] ON [ApprovalAuditEvents] ([CorrelationId]);
+            END;
             """,
             cancellationToken);
     }
@@ -436,6 +551,7 @@ internal sealed class EfFormsRepository : IFormsRepository
         existing.PublicationDomain = form.Publication.Domain;
         existing.PublicationAccessMode = (int)form.Publication.AccessMode;
         existing.PublicationSendSubmissionCopyToSubmitter = form.Publication.SendSubmissionCopyToSubmitter;
+        existing.PublicationEditMode = (int)form.Publication.EditMode;
 
         // Form versions are immutable snapshots; append new ones only.
         var existingVersionIds = existing.Versions.Select(v => v.Id).ToHashSet();
@@ -587,7 +703,19 @@ internal sealed class EfFormsRepository : IFormsRepository
                 e.SearchIndexEntries.Any(s => s.Value.Contains(searchTerm)));
         }
 
-        var list = await q.OrderByDescending(e => e.SubmittedUtc).ToListAsync(cancellationToken);
+        q = q.OrderByDescending(e => e.SubmittedUtc);
+
+        if (options.Offset > 0)
+        {
+            q = q.Skip(options.Offset);
+        }
+
+        if (options.Limit > 0)
+        {
+            q = q.Take(options.Limit);
+        }
+
+        var list = await q.ToListAsync(cancellationToken);
 
         return list.Select(ToEntryRecord).ToList();
     }
@@ -597,10 +725,29 @@ internal sealed class EfFormsRepository : IFormsRepository
         var entity = await db.Entries
             .Include(e => e.Revisions)
             .Include(e => e.ApprovalSteps)
+            .Include(e => e.ApprovalAuditTrail)
             .Include(e => e.Files)
             .Include(e => e.SearchIndexEntries)
+            .AsSplitQuery()
             .AsNoTracking()
             .FirstOrDefaultAsync(e => e.Id == entryId, cancellationToken);
+        return entity is null ? null : ToEntryRecord(entity);
+    }
+
+    public async Task<EntryRecord?> GetDraftEntryAsync(Guid formId, string submittedByEmail, CancellationToken cancellationToken = default)
+    {
+        var entity = await db.Entries
+            .Include(e => e.Revisions)
+            .Include(e => e.ApprovalSteps)
+            .Include(e => e.ApprovalAuditTrail)
+            .Include(e => e.Files)
+            .Include(e => e.SearchIndexEntries)
+            .AsSplitQuery()
+            .AsNoTracking()
+            .Where(e => e.FormId == formId && e.Status == (int)EntryStatus.Draft)
+            .OrderByDescending(e => e.SubmittedUtc)
+            .FirstOrDefaultAsync(e => e.SubmittedByEmail == submittedByEmail, cancellationToken);
+
         return entity is null ? null : ToEntryRecord(entity);
     }
 
@@ -614,6 +761,7 @@ internal sealed class EfFormsRepository : IFormsRepository
             .Include(e => e.ApprovalSteps)
             .Include(e => e.Files)
             .Include(e => e.SearchIndexEntries)
+            .AsSplitQuery()
             .FirstOrDefaultAsync(e => e.Id == entry.Id, cancellationToken);
 
         if (existing is null)
@@ -663,6 +811,7 @@ internal sealed class EfFormsRepository : IFormsRepository
                     ApproverEmail = a.ApproverEmail,
                     Status = (int)a.Status,
                     Signature = a.Signature,
+                    RejectionReason = a.RejectionReason,
                     CompletedUtc = a.CompletedUtc
                 });
                 continue;
@@ -673,6 +822,7 @@ internal sealed class EfFormsRepository : IFormsRepository
             existingStep.ApproverEmail = a.ApproverEmail;
             existingStep.Status = (int)a.Status;
             existingStep.Signature = a.Signature;
+            existingStep.RejectionReason = a.RejectionReason;
             existingStep.CompletedUtc = a.CompletedUtc;
         }
 
@@ -682,6 +832,33 @@ internal sealed class EfFormsRepository : IFormsRepository
             {
                 db.ApprovalSteps.Remove(existingStep);
             }
+        }
+
+        var existingAuditIds = await db.ApprovalAuditEvents
+            .AsNoTracking()
+            .Where(a => a.EntryId == existing.Id)
+            .Select(a => a.Id)
+            .ToHashSetAsync(cancellationToken);
+        foreach (var audit in entry.ApprovalAuditTrail.OrderBy(a => a.OccurredUtc))
+        {
+            if (existingAuditIds.Contains(audit.Id))
+            {
+                continue;
+            }
+
+            db.ApprovalAuditEvents.Add(new ApprovalAuditEventEntity
+            {
+                Id = audit.Id,
+                EntryId = existing.Id,
+                Action = (int)audit.Action,
+                ApprovalStepId = audit.ApprovalStepId,
+                ActorUserId = audit.ActorUserId,
+                ActorDisplayName = audit.ActorDisplayName,
+                Signature = audit.Signature,
+                Reason = audit.Reason,
+                CorrelationId = audit.CorrelationId,
+                OccurredUtc = audit.OccurredUtc
+            });
         }
 
         var existingSearchByKey = existing.SearchIndexEntries.ToDictionary(s => s.Key, StringComparer.OrdinalIgnoreCase);
@@ -722,6 +899,10 @@ internal sealed class EfFormsRepository : IFormsRepository
                     ContentType = file.ContentType,
                     Length = file.Length,
                     RelativePath = file.RelativePath,
+                    Sha256 = file.Sha256,
+                    UploadedByUserId = file.UploadedByUserId,
+                    UploadedByEmail = file.UploadedByEmail,
+                    RevisionNumber = file.RevisionNumber,
                     UploadedUtc = file.UploadedUtc
                 });
                 continue;
@@ -732,6 +913,10 @@ internal sealed class EfFormsRepository : IFormsRepository
             existingFile.ContentType = file.ContentType;
             existingFile.Length = file.Length;
             existingFile.RelativePath = file.RelativePath;
+            existingFile.Sha256 = file.Sha256;
+            existingFile.UploadedByUserId = file.UploadedByUserId;
+            existingFile.UploadedByEmail = file.UploadedByEmail;
+            existingFile.RevisionNumber = file.RevisionNumber;
             existingFile.UploadedUtc = file.UploadedUtc;
         }
 
@@ -753,6 +938,47 @@ internal sealed class EfFormsRepository : IFormsRepository
         }
 
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<EntryFileRecord>> GetOrphanedFilesAsync(DateTimeOffset olderThanUtc, CancellationToken cancellationToken = default)
+    {
+        var files = await db.EntryFiles
+            .AsNoTracking()
+            .Where(file => file.Entry != null && file.Entry.Status == (int)EntryStatus.Draft && file.Entry.SubmittedUtc < olderThanUtc)
+            .OrderBy(file => file.UploadedUtc)
+            .Select(file => new EntryFileRecord
+            {
+                Id = file.Id,
+                FieldId = file.FieldId,
+                FileName = file.FileName,
+                ContentType = file.ContentType,
+                Length = file.Length,
+                RelativePath = file.RelativePath,
+                Sha256 = file.Sha256,
+                UploadedByUserId = file.UploadedByUserId,
+                UploadedByEmail = file.UploadedByEmail,
+                RevisionNumber = file.RevisionNumber,
+                UploadedUtc = file.UploadedUtc
+            })
+            .ToListAsync(cancellationToken);
+
+        return files;
+    }
+
+    public async Task<int> DeleteDraftEntriesOlderThanAsync(DateTimeOffset olderThanUtc, CancellationToken cancellationToken = default)
+    {
+        var staleDrafts = await db.Entries
+            .Where(entry => entry.Status == (int)EntryStatus.Draft && entry.SubmittedUtc < olderThanUtc)
+            .ToListAsync(cancellationToken);
+
+        if (staleDrafts.Count == 0)
+        {
+            return 0;
+        }
+
+        db.Entries.RemoveRange(staleDrafts);
+        await db.SaveChangesAsync(cancellationToken);
+        return staleDrafts.Count;
     }
 
     public async Task<IReadOnlyList<FormInvitation>> GetInvitationsAsync(Guid formId, CancellationToken cancellationToken = default)
@@ -824,7 +1050,10 @@ internal sealed class EfFormsRepository : IFormsRepository
                 Slug = entity.PublicationSlug,
                 Domain = entity.PublicationDomain,
                 AccessMode = (FormAccessMode)entity.PublicationAccessMode,
-                SendSubmissionCopyToSubmitter = entity.PublicationSendSubmissionCopyToSubmitter
+                SendSubmissionCopyToSubmitter = entity.PublicationSendSubmissionCopyToSubmitter,
+                EditMode = entity.PublicationEditMode == 0
+                    ? SubmissionEditMode.ImmutableRevisions
+                    : (SubmissionEditMode)entity.PublicationEditMode
             },
             Versions = entity.Versions.OrderBy(v => v.VersionNumber).Select(v => new FormVersionRecord
             {
@@ -871,6 +1100,10 @@ internal sealed class EfFormsRepository : IFormsRepository
                 ContentType = f.ContentType,
                 Length = f.Length,
                 RelativePath = f.RelativePath,
+                Sha256 = f.Sha256,
+                UploadedByUserId = f.UploadedByUserId,
+                UploadedByEmail = f.UploadedByEmail,
+                RevisionNumber = f.RevisionNumber,
                 UploadedUtc = f.UploadedUtc
             }).ToList(),
             Revisions = entity.Revisions.Select(r => new EntryRevisionRecord
@@ -889,7 +1122,22 @@ internal sealed class EfFormsRepository : IFormsRepository
                 ApproverEmail = a.ApproverEmail,
                 Status = (ApprovalStepStatus)a.Status,
                 Signature = a.Signature,
+                RejectionReason = a.RejectionReason,
                 CompletedUtc = a.CompletedUtc
+            }).ToList(),
+            ApprovalAuditTrail = entity.ApprovalAuditTrail
+                .OrderBy(a => a.OccurredUtc)
+                .Select(a => new ApprovalAuditEvent
+                {
+                    Id = a.Id,
+                    Action = (ApprovalAuditAction)a.Action,
+                    ApprovalStepId = a.ApprovalStepId,
+                ActorUserId = a.ActorUserId,
+                ActorDisplayName = a.ActorDisplayName,
+                Signature = a.Signature,
+                Reason = a.Reason,
+                CorrelationId = a.CorrelationId,
+                OccurredUtc = a.OccurredUtc
             }).ToList()
         };
     }
