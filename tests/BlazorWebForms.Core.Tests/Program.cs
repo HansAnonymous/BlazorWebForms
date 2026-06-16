@@ -22,6 +22,9 @@ var repository = (FakeRepository)provider.GetRequiredService<IFormsRepository>()
 
 await repository.SeedAsync();
 
+// Run isolated unit tests for modules with least coverage
+await IsolatedUnitTests.RunAllAsync();
+
 var definition = DemoFormFactory.CreateDefaultDefinition();
 var json = serializer.Serialize(definition);
 var roundTrip = serializer.Deserialize(json);
