@@ -67,52 +67,7 @@ internal sealed class EfFormsRepository : IFormsRepository
                 var existingForm = await db.Forms.Include(f => f.Versions).FirstOrDefaultAsync(cancellationToken);
                 if (existingForm is not null && existingForm.Versions.Any())
                 {
-                    var seedEntry = new EntryEntity
-                    {
-                        FormId = existingForm.Id,
-                        FormVersionId = existingForm.Versions.First().Id,
-                        SubmittedBy = "Taylor Submitter",
-                        SubmittedByEmail = "taylor@example.com",
-                        Status = (int)EntryStatus.NeedsApproval,
-                        SubmittedUtc = DateTimeOffset.UtcNow
-                    };
-
-                    seedEntry.SearchIndex = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-                    {
-                        ["employeeName"] = "Taylor Submitter",
-                        ["destination"] = "Phoenix"
-                    };
-
-                    seedEntry.Revisions.Add(new EntryRevisionEntity
-                    {
-                        RevisionNumber = 1,
-                        EditedBy = "Taylor Submitter",
-                        EditedUtc = seedEntry.SubmittedUtc,
-                        Answers = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
-                        {
-                            ["employeeName"] = "Taylor Submitter",
-                            ["destination"] = "Phoenix"
-                        }
-                    });
-
-                    seedEntry.ApprovalSteps.Add(new ApprovalStepEntity
-                    {
-                        Order = 1,
-                        ApproverName = "Casey Manager",
-                        ApproverEmail = "casey@example.com",
-                        Status = (int)ApprovalStepStatus.Pending
-                    });
-
-                    foreach (var kv in seedEntry.SearchIndex)
-                    {
-                        seedEntry.SearchIndexEntries.Add(new EntrySearchIndexEntity
-                        {
-                            Id = Guid.NewGuid(),
-                            Key = kv.Key,
-                            Value = kv.Value
-                        });
-                    }
-
+                    var seedEntry = DemoEntrySeedHelper.CreateDemoEntry(existingForm.Id, existingForm.Versions.First().Id);
                     db.Entries.Add(seedEntry);
                     await db.SaveChangesAsync(cancellationToken);
                 }
@@ -221,52 +176,7 @@ internal sealed class EfFormsRepository : IFormsRepository
         db.Forms.Add(entity);
         await db.SaveChangesAsync(cancellationToken);
         // seed a demo entry to match in-memory behavior
-        var entry = new EntryEntity
-        {
-            FormId = entity.Id,
-            FormVersionId = entity.Versions.First().Id,
-            SubmittedBy = "Taylor Submitter",
-            SubmittedByEmail = "taylor@example.com",
-            Status = (int)EntryStatus.NeedsApproval,
-            SubmittedUtc = DateTimeOffset.UtcNow
-        };
-
-        entry.SearchIndex = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["employeeName"] = "Taylor Submitter",
-            ["destination"] = "Phoenix"
-        };
-
-        entry.Revisions.Add(new EntryRevisionEntity
-        {
-            RevisionNumber = 1,
-            EditedBy = "Taylor Submitter",
-            EditedUtc = entry.SubmittedUtc,
-            Answers = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["employeeName"] = "Taylor Submitter",
-                ["destination"] = "Phoenix"
-            }
-        });
-
-        entry.ApprovalSteps.Add(new ApprovalStepEntity
-        {
-            Order = 1,
-            ApproverName = "Casey Manager",
-            ApproverEmail = "casey@example.com",
-            Status = (int)ApprovalStepStatus.Pending
-        });
-
-        foreach (var kv in entry.SearchIndex)
-        {
-            entry.SearchIndexEntries.Add(new EntrySearchIndexEntity
-            {
-                Id = Guid.NewGuid(),
-                Key = kv.Key,
-                Value = kv.Value
-            });
-        }
-
+        var entry = DemoEntrySeedHelper.CreateDemoEntry(entity.Id, entity.Versions.First().Id);
         db.Entries.Add(entry);
         await db.SaveChangesAsync(cancellationToken);
     }
