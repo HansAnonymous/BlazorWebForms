@@ -2,6 +2,8 @@
 
 Quick guide: run sample app with SQL persistence and apply EF migrations.
 
+Developer docs for using and iterating from another solution: [docs/USING_BlazorWebForms.md](docs/USING_BlazorWebForms.md)
+
 Prereqs
 - .NET 8/10 SDK installed
 - LocalDB (SQL Server Express LocalDB) or SQL Server accessible

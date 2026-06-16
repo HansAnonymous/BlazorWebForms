@@ -21,4 +21,7 @@
     <Project Path="tests/BlazorWebForms.Core.Tests/BlazorWebForms.Core.Tests.csproj" />
     <Project Path="tests/BlazorWebForms.Infrastructure.SqlServer.Tests/BlazorWebForms.Infrastructure.SqlServer.Tests.csproj" />
   </Folder>
+  <Folder Name="/docs/">
+    <File Path="docs/USING_BlazorWebForms.md" />
+  </Folder>
 </Solution>

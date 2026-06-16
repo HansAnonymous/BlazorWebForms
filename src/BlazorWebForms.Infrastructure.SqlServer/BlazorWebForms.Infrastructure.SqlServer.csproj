@@ -1,7 +1,25 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
+
+    <!-- NuGet Package Metadata -->
+    <PackageId>BlazorWebForms.Infrastructure.SqlServer</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>HansAnonymous</Authors>
+    <Company>HansAnonymous</Company>
+    <Description>SQL Server infrastructure implementation for BlazorWebForms - Provides Entity Framework Core integration for SQL Server persistence.</Description>
+    <PackageTags>blazor;webforms;sqlserver;entityframeworkcore;infrastructure</PackageTags>
+    <PackageLicenseExpression>AGPL-3.0-only</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/HansAnonymous/BlazorWebForms</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/HansAnonymous/BlazorWebForms</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\BlazorWebForms.Core\BlazorWebForms.Core.csproj" />
