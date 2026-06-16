@@ -1,14 +1,30 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Hosting;
 
 namespace BlazorWebForms.SampleApp;
 
-public sealed class EntryFileDownloadTokenService(IConfiguration configuration)
+public sealed class EntryFileDownloadTokenService
 {
-    private readonly byte[] secret = Encoding.UTF8.GetBytes(
-        configuration["BlazorWebForms:FileDownloadTokenSecret"]
-        ?? "dev-only-secret-change-this-before-production");
+    private readonly byte[] secret;
+
+    public EntryFileDownloadTokenService(IConfiguration configuration, IHostEnvironment environment)
+    {
+        var configured = configuration["BlazorWebForms:FileDownloadTokenSecret"];
+        if (string.IsNullOrWhiteSpace(configured) && !environment.IsDevelopment())
+        {
+            throw new InvalidOperationException(
+                "BlazorWebForms:FileDownloadTokenSecret must be configured in non-development environments.");
+        }
+
+        secret = Encoding.UTF8.GetBytes(configured ?? GenerateEphemeralDevSecret());
+    }
+
+    private static string GenerateEphemeralDevSecret()
+    {
+        return Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
+    }
 
     public string Create(Guid entryId, Guid fileId, TimeSpan validFor)
     {

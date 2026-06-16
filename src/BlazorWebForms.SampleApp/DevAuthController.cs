@@ -2,11 +2,14 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.Extensions.Hosting;
 
 namespace BlazorWebForms.SampleApp;
 
 [ApiController]
 [Route("auth")]
+[ServiceFilter(typeof(DevelopmentOnlyFilter))]
 public sealed class DevAuthController : ControllerBase
 {
     [HttpPost("login")]
