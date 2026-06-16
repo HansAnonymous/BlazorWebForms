@@ -14,12 +14,6 @@ public interface IConditionEvaluator
     bool IsVisible(VisibilityConditionDefinition? condition, IReadOnlyDictionary<string, string?> answers);
 }
 
-public interface IFieldComponentRegistry
-{
-    IReadOnlyCollection<FormFieldKind> SupportedFieldKinds { get; }
-    bool Supports(FormFieldKind kind);
-}
-
 public interface IFileStorage
 {
     Task<StoredFile> SaveAsync(FileUploadRequest request, CancellationToken cancellationToken = default);
@@ -64,13 +58,6 @@ public interface IGraphIntegration
 public interface IPdfIntegration
 {
     Task<byte[]> RenderAsync(string title, IReadOnlyDictionary<string, string?> fields, CancellationToken cancellationToken = default);
-}
-
-public interface IIntegrationGateway
-{
-    IEmailIntegration Email { get; }
-    IGraphIntegration Graph { get; }
-    IPdfIntegration Pdf { get; }
 }
 
 public interface IAntiAbuseGuard

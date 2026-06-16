@@ -5,7 +5,8 @@ namespace BlazorWebForms.Infrastructure.SqlServer;
 
 internal sealed class TemplateEmailNotifier(
     BlazorWebFormsSqlServerOptions options,
-    IIntegrationGateway integrations,
+    IEmailIntegration emailIntegration,
+    IGraphIntegration graphIntegration,
     IAntiAbuseGuard antiAbuseGuard,
     IOperationalTelemetry telemetry) : IEmailNotifier
 {
@@ -40,7 +41,7 @@ internal sealed class TemplateEmailNotifier(
                     return null;
                 }
 
-                var result = await integrations.Graph.SendApprovalReminderAsync(form, entry, step, ct);
+                var result = await graphIntegration.SendApprovalReminderAsync(form, entry, step, ct);
                 result.Data.TryGetValue("correlationId", out var correlationId);
                 return correlationId;
             },
@@ -61,7 +62,7 @@ internal sealed class TemplateEmailNotifier(
             {
                 if (options.EnableGraphIntegration)
                 {
-                    var result = await integrations.Graph.SendApprovalReminderAsync(form, entry, step, ct);
+                    var result = await graphIntegration.SendApprovalReminderAsync(form, entry, step, ct);
                     result.Data.TryGetValue("correlationId", out var correlationId);
                     return correlationId;
                 }
@@ -108,7 +109,7 @@ internal sealed class TemplateEmailNotifier(
             {
                 if (options.EnableGraphIntegration)
                 {
-                    var result = await integrations.Graph.SendInvitationAsync(form, invitation, ct);
+                    var result = await graphIntegration.SendInvitationAsync(form, invitation, ct);
                     result.Data.TryGetValue("correlationId", out var correlationId);
                     return correlationId;
                 }
@@ -164,7 +165,7 @@ internal sealed class TemplateEmailNotifier(
             try
             {
                 await antiAbuseGuard.CheckOutboundNotificationAllowedAsync("email", "integration@example.com", cancellationToken);
-                await integrations.Email.SendAsync("integration@example.com", subject, body, cancellationToken);
+                await emailIntegration.SendAsync("integration@example.com", subject, body, cancellationToken);
                 telemetry.TrackEmailDelivery("email", success: true);
                 if (afterSend is not null)
                 {

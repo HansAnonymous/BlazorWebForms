@@ -11,7 +11,6 @@ public static class BlazorWebFormsServiceCollectionExtensions
     {
         services.AddSingleton<IFormDefinitionSerializer, JsonFormDefinitionSerializer>();
         services.AddSingleton<IConditionEvaluator, SimpleConditionEvaluator>();
-        services.AddSingleton<IFieldComponentRegistry, DefaultFieldComponentRegistry>();
         services.AddSingleton<IPermissionEvaluator, DefaultPermissionEvaluator>();
         services.AddSingleton<ICoreMetadataCache, InMemoryCoreMetadataCache>();
         services.TryAddSingleton<IAntiAbuseGuard, NoOpAntiAbuseGuard>();

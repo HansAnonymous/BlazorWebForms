@@ -30,7 +30,6 @@ public static class ServiceCollectionExtensions
         services.TryAddSingleton<IEmailIntegration, EmailIntegrationRouter>();
         services.TryAddSingleton<IGraphIntegration, GraphIntegration>();
         services.TryAddSingleton<IPdfIntegration, PdfIntegration>();
-        services.TryAddSingleton<IIntegrationGateway, IntegrationGateway>();
         services.TryAddSingleton<IAntiAbuseGuard, DefaultAntiAbuseGuard>();
         services.AddSingleton<IOperationalTelemetry, InMemoryOperationalTelemetry>();
         services.TryAddSingleton<IPdfExporter, TextPdfExporter>();

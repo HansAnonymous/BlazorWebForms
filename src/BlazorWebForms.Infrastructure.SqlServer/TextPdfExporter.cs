@@ -8,7 +8,7 @@ namespace BlazorWebForms.Infrastructure.SqlServer;
 internal sealed class TextPdfExporter(
     BlazorWebFormsSqlServerOptions options,
     IFormDefinitionSerializer serializer,
-    IIntegrationGateway integrations) : IPdfExporter
+    IPdfIntegration pdfIntegration) : IPdfExporter
 {
     public async Task<byte[]> ExportEntryAsync(FormAggregate form, EntryRecord entry, CancellationToken cancellationToken = default)
     {
@@ -88,7 +88,7 @@ internal sealed class TextPdfExporter(
             ["status"] = entry.Status.ToString(),
             ["content"] = builder.ToString()
         };
-        var payload = await integrations.Pdf.RenderAsync($"Entry {entry.Id}", fields, cancellationToken);
+        var payload = await pdfIntegration.RenderAsync($"Entry {entry.Id}", fields, cancellationToken);
         if (payload.Length > options.PdfMaxBytes)
         {
             throw new InvalidOperationException($"PDF export exceeded max configured size of {options.PdfMaxBytes} bytes.");

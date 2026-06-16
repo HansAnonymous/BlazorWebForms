@@ -108,27 +108,6 @@ internal sealed class SimpleConditionEvaluator : IConditionEvaluator
     }
 }
 
-internal sealed class DefaultFieldComponentRegistry : IFieldComponentRegistry
-{
-    private static readonly HashSet<FormFieldKind> Kinds =
-    [
-        FormFieldKind.Text,
-        FormFieldKind.TextArea,
-        FormFieldKind.Number,
-        FormFieldKind.Select,
-        FormFieldKind.Checkbox,
-        FormFieldKind.Radio,
-        FormFieldKind.Date,
-        FormFieldKind.File,
-        FormFieldKind.RichText,
-        FormFieldKind.Signature
-    ];
-
-    public IReadOnlyCollection<FormFieldKind> SupportedFieldKinds => Kinds;
-
-    public bool Supports(FormFieldKind kind) => Kinds.Contains(kind);
-}
-
 internal sealed class DefaultPermissionEvaluator : IPermissionEvaluator
 {
     private static bool IsAdmin(UserProfile user) => user.Roles.Contains(FormPermissionRole.Admin);
