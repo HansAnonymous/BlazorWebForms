@@ -17,9 +17,13 @@ public sealed class EntryPdfController(FormsApplicationService formsService) : C
             var exported = await formsService.ExportEntryPdfAsync(entryId, cancellationToken);
             return File(exported.Content, exported.ContentType, exported.FileName);
         }
-        catch (InvalidOperationException)
+        catch (InvalidOperationException ex) when (ex.Message.Contains("cannot export", StringComparison.OrdinalIgnoreCase))
         {
             return Forbid();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { error = ex.Message });
         }
     }
 }

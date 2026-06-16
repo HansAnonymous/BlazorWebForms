@@ -40,8 +40,9 @@ internal sealed class EfFormsRepository : IFormsRepository
 
             requiresMigration = hasAppliedMigrations || !formsTableExists;
         }
-        catch
+        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
+            // Probe query can fail when database/table doesn't exist yet — this is expected on first run.
             requiresMigration = true;
         }
 

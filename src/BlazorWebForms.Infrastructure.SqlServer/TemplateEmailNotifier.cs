@@ -189,7 +189,8 @@ internal sealed class TemplateEmailNotifier(
             }
         }
 
-        _ = last;
-        return null;
+        throw new InvalidOperationException(
+            $"Email delivery failed after {options.EmailRetryCount} attempt(s) for key '{key}'.",
+            last);
     }
 }
