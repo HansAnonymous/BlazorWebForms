@@ -93,6 +93,7 @@ builder.Services.AddBlazorWebFormsSqlServer(options =>
 builder.Services.AddSingleton<IAuthorizationHandler, RoleSetAuthorizationHandler>();
 builder.Services.AddSingleton<IAuthorizationHandler, SelfOrManagerAuthorizationHandler>();
 builder.Services.AddSingleton<EntryFileDownloadTokenService>();
+builder.Services.AddSingleton<DevelopmentOnlyFilter>();
 builder.Services.AddScoped<BlazorWebForms.Core.Abstractions.ICurrentUserContext, ClaimsCurrentUserContext>();
 
 var app = builder.Build();
@@ -114,6 +115,9 @@ app.UseAuthorization();
 app.Use(async (context, next) =>
 {
     context.Response.Headers["Permissions-Policy"] = "unload=self, fullscreen=(), geolocation=()";
+    context.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    context.Response.Headers["X-Frame-Options"] = "DENY";
+    context.Response.Headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
     await next();
 });
 
@@ -132,7 +136,7 @@ app.MapGet("/culture/set", (HttpContext httpContext, string culture, string? ret
         httpContext.Response.Cookies.Append(
             CookieRequestCultureProvider.DefaultCookieName,
             CookieRequestCultureProvider.MakeCookieValue(requestCulture),
-            new CookieOptions { Expires = DateTimeOffset.UtcNow.AddYears(1), IsEssential = true });
+            new CookieOptions { Expires = DateTimeOffset.UtcNow.AddYears(1), IsEssential = true, HttpOnly = true, Secure = true, SameSite = SameSiteMode.Lax });
     }
 
     var destination = "/";
