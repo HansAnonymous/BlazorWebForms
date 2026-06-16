@@ -247,17 +247,24 @@ else
             return;
         }
 
-        var draft = await FormsService.SaveDraftSubmissionAsync(ViewModel.Form.Id, new SaveDraftSubmissionRequest
+        try
         {
-            DraftEntryId = DraftEntryId,
-            Answers = new Dictionary<string, string?>(Answers, StringComparer.OrdinalIgnoreCase),
-            Approvers = Approvers.Where(x => !string.IsNullOrWhiteSpace(x.Email)).ToList(),
-            Files = Files
-        });
+            var draft = await FormsService.SaveDraftSubmissionAsync(ViewModel.Form.Id, new SaveDraftSubmissionRequest
+            {
+                DraftEntryId = DraftEntryId,
+                Answers = new Dictionary<string, string?>(Answers, StringComparer.OrdinalIgnoreCase),
+                Approvers = Approvers.Where(x => !string.IsNullOrWhiteSpace(x.Email)).ToList(),
+                Files = Files
+            });
 
-        DraftEntryId = draft.Id;
-        LatestEntry = draft;
-        StatusMessage = $"Draft {draft.Id} saved.";
+            DraftEntryId = draft.Id;
+            LatestEntry = draft;
+            StatusMessage = $"Draft {draft.Id} saved.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            StatusMessage = ex.Message;
+        }
     }
 
     private static string GetStatusBadgeClass(EntryStatus status) => status switch

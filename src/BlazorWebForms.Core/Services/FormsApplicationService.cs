@@ -706,8 +706,15 @@ public sealed class FormsApplicationService(
 
         foreach (var orphanedFile in orphanedFiles)
         {
-            await fileStorage.DeleteAsync(orphanedFile.RelativePath, cancellationToken);
-            deletedFiles++;
+            try
+            {
+                await fileStorage.DeleteAsync(orphanedFile.RelativePath, cancellationToken);
+                deletedFiles++;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                telemetry.TrackFailure("cleanup", "file-delete", ex.GetType().Name);
+            }
         }
 
         var deletedDraftEntries = await repository.DeleteDraftEntriesOlderThanAsync(cutoffUtc, cancellationToken);
