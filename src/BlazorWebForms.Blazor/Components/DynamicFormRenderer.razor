@@ -406,25 +406,11 @@
     private static int GetMaxFileCount(FormFieldDefinition field) =>
         field.MaxFileCount <= 0 ? 1 : field.MaxFileCount;
 
-    private bool IsSectionVisible(FormSectionDefinition section)
-    {
-        if (section.VisibilityRules is not null && section.VisibilityRules.Rules.Count > 0)
-        {
-            return ConditionEvaluator.IsVisible(section.VisibilityRules, Answers);
-        }
+    private bool IsSectionVisible(FormSectionDefinition section) =>
+        VisibilityEvaluationHelper.IsSectionVisible(ConditionEvaluator, section, Answers);
 
-        return ConditionEvaluator.IsVisible(section.VisibilityCondition, Answers);
-    }
-
-    private bool IsFieldVisible(FormFieldDefinition field)
-    {
-        if (field.VisibilityRules is not null && field.VisibilityRules.Rules.Count > 0)
-        {
-            return ConditionEvaluator.IsVisible(field.VisibilityRules, Answers);
-        }
-
-        return ConditionEvaluator.IsVisible(field.VisibilityCondition, Answers);
-    }
+    private bool IsFieldVisible(FormFieldDefinition field) =>
+        VisibilityEvaluationHelper.IsFieldVisible(ConditionEvaluator, field, Answers);
 
     private static int GetSectionColumns(FormSectionDefinition section) =>
         FormLayoutResolver.ResolveSectionColumns(section);

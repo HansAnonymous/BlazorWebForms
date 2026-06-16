@@ -210,37 +210,10 @@ public sealed class FormsApplicationService(
         entry.Status = request.Approvers.Count > 0 ? EntryStatus.NeedsApproval : EntryStatus.Submitted;
         var revisionNumber = entry.Revisions.Count + 1;
 
-        foreach (var field in definition.Sections.SelectMany(section => section.Fields).Where(field => field.Searchable))
-        {
-            if (entry.Answers.TryGetValue(field.Id, out var value) && !string.IsNullOrWhiteSpace(value))
-            {
-                entry.SearchIndex[field.Id] = value!;
-            }
-        }
+        entry.SearchIndex = SearchIndexBuilder.Build(definition, entry.Answers);
 
-        entry.Files = request.Files
-            .Where(f => !string.IsNullOrWhiteSpace(f.FieldId))
-            .Select(submittedFile => new EntryFileRecord
-            {
-                FieldId = submittedFile.FieldId,
-                FileName = submittedFile.File.FileName,
-                ContentType = submittedFile.File.ContentType,
-                Length = submittedFile.File.Length,
-                RelativePath = submittedFile.File.RelativePath,
-                Sha256 = submittedFile.File.Sha256,
-                UploadedByUserId = user.UserId,
-                UploadedByEmail = user.Email,
-                RevisionNumber = revisionNumber,
-                UploadedUtc = DateTimeOffset.UtcNow
-            })
-            .ToList();
-
-        foreach (var filesByField in request.Files
-                     .Where(f => !string.IsNullOrWhiteSpace(f.FieldId))
-                     .GroupBy(f => f.FieldId, StringComparer.OrdinalIgnoreCase))
-        {
-            entry.Answers[filesByField.Key] = string.Join(", ", filesByField.Select(f => f.File.FileName));
-        }
+        entry.Files = EntryFileMapper.MapFiles(request.Files, user.UserId, user.Email, revisionNumber);
+        EntryFileMapper.ApplyFileAnswers(entry.Answers, request.Files);
 
         entry.Revisions.Add(new EntryRevisionRecord
         {
@@ -316,38 +289,11 @@ public sealed class FormsApplicationService(
         entry.SearchIndex = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var revisionNumber = entry.Revisions.Count + 1;
 
-        entry.Files = request.Files
-            .Where(f => !string.IsNullOrWhiteSpace(f.FieldId))
-            .Select(submittedFile => new EntryFileRecord
-            {
-                FieldId = submittedFile.FieldId,
-                FileName = submittedFile.File.FileName,
-                ContentType = submittedFile.File.ContentType,
-                Length = submittedFile.File.Length,
-                RelativePath = submittedFile.File.RelativePath,
-                Sha256 = submittedFile.File.Sha256,
-                UploadedByUserId = user.UserId,
-                UploadedByEmail = user.Email,
-                RevisionNumber = revisionNumber,
-                UploadedUtc = DateTimeOffset.UtcNow
-            })
-            .ToList();
-
-        foreach (var filesByField in request.Files
-                     .Where(f => !string.IsNullOrWhiteSpace(f.FieldId))
-                     .GroupBy(f => f.FieldId, StringComparer.OrdinalIgnoreCase))
-        {
-            entry.Answers[filesByField.Key] = string.Join(", ", filesByField.Select(f => f.File.FileName));
-        }
+        entry.Files = EntryFileMapper.MapFiles(request.Files, user.UserId, user.Email, revisionNumber);
+        EntryFileMapper.ApplyFileAnswers(entry.Answers, request.Files);
 
         var definition = serializer.Deserialize(version.DefinitionJson);
-        foreach (var field in definition.Sections.SelectMany(section => section.Fields).Where(field => field.Searchable))
-        {
-            if (entry.Answers.TryGetValue(field.Id, out var value) && !string.IsNullOrWhiteSpace(value))
-            {
-                entry.SearchIndex[field.Id] = value!;
-            }
-        }
+        entry.SearchIndex = SearchIndexBuilder.Build(definition, entry.Answers);
 
         entry.ApprovalSteps = request.Approvers
             .Where(a => !string.IsNullOrWhiteSpace(a.Email))
@@ -425,15 +371,7 @@ public sealed class FormsApplicationService(
         var definition = serializer.Deserialize(version.DefinitionJson);
 
         entry.Answers = new Dictionary<string, string?>(answers, StringComparer.OrdinalIgnoreCase);
-        entry.SearchIndex = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var field in definition.Sections.SelectMany(section => section.Fields).Where(field => field.Searchable))
-        {
-            if (entry.Answers.TryGetValue(field.Id, out var value) && !string.IsNullOrWhiteSpace(value))
-            {
-                entry.SearchIndex[field.Id] = value!;
-            }
-        }
+        entry.SearchIndex = SearchIndexBuilder.Build(definition, entry.Answers);
 
         entry.Revisions.Add(new EntryRevisionRecord
         {
@@ -468,41 +406,10 @@ public sealed class FormsApplicationService(
     {
         var entry = await repository.GetEntryAsync(entryId, cancellationToken)
                     ?? throw new InvalidOperationException("Entry not found.");
-        if (entry.Status != EntryStatus.NeedsApproval)
-        {
-            throw new InvalidOperationException("Entry is not in a review state.");
-        }
-
-        var pendingOrdered = entry.ApprovalSteps
-            .Where(s => s.Status == ApprovalStepStatus.Pending)
-            .OrderBy(s => s.Order)
-            .ToList();
-        if (pendingOrdered.Count == 0)
-        {
-            throw new InvalidOperationException("No pending approval steps remain.");
-        }
-
-        var nextStepId = pendingOrdered[0].Id;
-        if (nextStepId != stepId)
-        {
-            throw new InvalidOperationException("Only the next pending approval step can be acted on.");
-        }
-
-        var step = entry.ApprovalSteps.FirstOrDefault(candidate => candidate.Id == stepId)
-                   ?? throw new InvalidOperationException("Approval step not found.");
-        if (step.Status != ApprovalStepStatus.Pending)
-        {
-            throw new InvalidOperationException("Approval step is not pending.");
-        }
-
-        var user = currentUserContext.GetCurrentUser();
-        var form = await repository.GetFormAsync(entry.FormId, cancellationToken)
-                   ?? throw new InvalidOperationException("Form not found.");
-        var isApprover = string.Equals(step.ApproverEmail, user.Email, StringComparison.OrdinalIgnoreCase);
-        if (!(permissionEvaluator.CanManageForm(form, user) || isApprover || user.Roles.Contains(FormPermissionRole.Admin)))
-        {
-            throw new InvalidOperationException("Current user cannot approve this step.");
-        }
+        var guard = await ApprovalStepGuard.ValidateAsync(entry, stepId, repository, currentUserContext, permissionEvaluator, cancellationToken);
+        var step = guard.Step;
+        var form = guard.Form;
+        var user = guard.User;
 
         step.Status = ApprovalStepStatus.Approved;
         step.Signature = signature;
@@ -536,46 +443,16 @@ public sealed class FormsApplicationService(
     {
         var entry = await repository.GetEntryAsync(entryId, cancellationToken)
                     ?? throw new InvalidOperationException("Entry not found.");
-        if (entry.Status != EntryStatus.NeedsApproval)
-        {
-            throw new InvalidOperationException("Entry is not in a review state.");
-        }
 
         if (string.IsNullOrWhiteSpace(reason))
         {
             throw new InvalidOperationException("Rejection reason is required.");
         }
 
-        var pendingOrdered = entry.ApprovalSteps
-            .Where(s => s.Status == ApprovalStepStatus.Pending)
-            .OrderBy(s => s.Order)
-            .ToList();
-        if (pendingOrdered.Count == 0)
-        {
-            throw new InvalidOperationException("No pending approval steps remain.");
-        }
-
-        var nextStepId = pendingOrdered[0].Id;
-        if (nextStepId != stepId)
-        {
-            throw new InvalidOperationException("Only the next pending approval step can be acted on.");
-        }
-
-        var step = entry.ApprovalSteps.FirstOrDefault(candidate => candidate.Id == stepId)
-                   ?? throw new InvalidOperationException("Approval step not found.");
-        if (step.Status != ApprovalStepStatus.Pending)
-        {
-            throw new InvalidOperationException("Approval step is not pending.");
-        }
-
-        var user = currentUserContext.GetCurrentUser();
-        var form = await repository.GetFormAsync(entry.FormId, cancellationToken)
-                   ?? throw new InvalidOperationException("Form not found.");
-        var isApprover = string.Equals(step.ApproverEmail, user.Email, StringComparison.OrdinalIgnoreCase);
-        if (!(permissionEvaluator.CanManageForm(form, user) || isApprover || user.Roles.Contains(FormPermissionRole.Admin)))
-        {
-            throw new InvalidOperationException("Current user cannot reject this step.");
-        }
+        var guard = await ApprovalStepGuard.ValidateAsync(entry, stepId, repository, currentUserContext, permissionEvaluator, cancellationToken);
+        var step = guard.Step;
+        var form = guard.Form;
+        var user = guard.User;
 
         step.Status = ApprovalStepStatus.Rejected;
         step.RejectionReason = reason.Trim();
@@ -621,14 +498,7 @@ public sealed class FormsApplicationService(
         var definition = serializer.Deserialize(version.DefinitionJson);
 
         entry.Answers = new Dictionary<string, string?>(request.Answers, StringComparer.OrdinalIgnoreCase);
-        entry.SearchIndex = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var field in definition.Sections.SelectMany(section => section.Fields).Where(field => field.Searchable))
-        {
-            if (entry.Answers.TryGetValue(field.Id, out var value) && !string.IsNullOrWhiteSpace(value))
-            {
-                entry.SearchIndex[field.Id] = value!;
-            }
-        }
+        entry.SearchIndex = SearchIndexBuilder.Build(definition, entry.Answers);
 
         entry.ApprovalSteps = request.Approvers
             .Where(a => !string.IsNullOrWhiteSpace(a.Email))
@@ -1163,30 +1033,8 @@ public sealed class FormsApplicationService(
         }
     }
 
-    private static IEnumerable<string> GetConditionReferences(string? condition, VisibilityConditionDefinition? rules)
-    {
-        if (rules is not null)
-        {
-            foreach (var rule in rules.Rules)
-            {
-                if (!string.IsNullOrWhiteSpace(rule.FieldId))
-                {
-                    yield return rule.FieldId;
-                }
-            }
-        }
-
-        if (string.IsNullOrWhiteSpace(condition))
-        {
-            yield break;
-        }
-
-        var parts = condition.Split('=', 2, StringSplitOptions.TrimEntries);
-        if (parts.Length == 2 && !string.IsNullOrWhiteSpace(parts[0]))
-        {
-            yield return parts[0];
-        }
-    }
+    private static IEnumerable<string> GetConditionReferences(string? condition, VisibilityConditionDefinition? rules) =>
+        ConditionReferenceHelper.GetConditionReferences(condition, rules);
 
     private static void ValidateLocalizationPayload(FormDefinition definition)
     {
