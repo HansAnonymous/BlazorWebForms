@@ -43,6 +43,11 @@ public interface ICurrentUserContext
     UserProfile GetCurrentUser();
 }
 
+public interface IEmployeePrefillProvider
+{
+    Task<IReadOnlyDictionary<string, string?>> GetEmployeeDataAsync(UserProfile requester, string employeeEmail, CancellationToken cancellationToken = default);
+}
+
 public interface IEmailIntegration
 {
     Task SendAsync(string to, string subject, string body, CancellationToken cancellationToken = default);
