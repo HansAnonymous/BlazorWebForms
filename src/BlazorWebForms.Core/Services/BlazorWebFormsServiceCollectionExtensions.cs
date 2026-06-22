@@ -14,6 +14,9 @@ public static class BlazorWebFormsServiceCollectionExtensions
         services.AddSingleton<IPermissionEvaluator, DefaultPermissionEvaluator>();
         services.AddSingleton<ICoreMetadataCache, InMemoryCoreMetadataCache>();
         services.TryAddSingleton<IEmployeePrefillProvider, NoOpEmployeePrefillProvider>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IFormPrefillProvider, ClaimFormPrefillProvider>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IFormPrefillProvider, EmployeeFormPrefillProvider>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IFormPrefillProvider, FixedValueFormPrefillProvider>());
         services.TryAddSingleton<IAntiAbuseGuard, NoOpAntiAbuseGuard>();
         services.TryAddSingleton<IOperationalTelemetry, NoOpOperationalTelemetry>();
         services.AddScoped<FormsApplicationService>();

@@ -82,6 +82,48 @@ Notes:
 - Validation before publishing: switch back to **PackageReference** and test with packed artifacts.
 - Public release: publish the final package set to NuGet.org with matching versions.
 
+## Custom form prefill providers
+
+Register `IFormPrefillProvider` implementations when an app needs to populate answers from application-owned data such as HR tables, cost-center records, or other database lookups.
+
+```csharp
+builder.Services.AddBlazorWebFormsCore();
+builder.Services.AddSingleton<IFormPrefillProvider, HrDatabasePrefillProvider>();
+
+public sealed class HrDatabasePrefillProvider(EmployeeDbContext db) : IFormPrefillProvider
+{
+    public string ProviderKey => "hr-database";
+
+    public bool CanResolve(FormFieldPrefillDefinition prefill) =>
+        prefill.Source == PrefillSourceKind.Custom;
+
+    public async Task<string?> ResolveAsync(FormPrefillRequest request, CancellationToken cancellationToken = default)
+    {
+        var email = request.SubjectEmail ?? request.Requester.Email;
+        var employee = await db.Employees.SingleOrDefaultAsync(e => e.Email == email, cancellationToken);
+
+        return request.Field.Prefill.Key switch
+        {
+            "department" => employee?.Department,
+            "costCenter" => employee?.CostCenter,
+            "managerEmail" => employee?.ManagerEmail,
+            _ => null
+        };
+    }
+}
+```
+
+Builder configuration for a custom field:
+
+```text
+Prefill source: Custom
+Prefill provider key: hr-database
+Prefill key: costCenter
+Only prefill empty answers: true
+```
+
+Built-in providers remain available for `Claim`, `Employee` (`IEmployeePrefillProvider`), and `FixedValue`. Manager-prefilled drafts intentionally skip claim providers so a manager does not stamp their own claims into a submitter's draft; custom and employee providers receive `SubjectEmail` for the target submitter.
+
 ## Quick verification checklist
 
 1. Restore succeeds in consumer solution.

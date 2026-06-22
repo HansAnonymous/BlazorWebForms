@@ -75,6 +75,7 @@ public sealed class FormFieldDefinition
 public sealed class FormFieldPrefillDefinition
 {
     public PrefillSourceKind Source { get; set; } = PrefillSourceKind.None;
+    public string ProviderKey { get; set; } = string.Empty;
     public string Key { get; set; } = string.Empty;
     public bool ApplyWhenEmpty { get; set; } = true;
 }

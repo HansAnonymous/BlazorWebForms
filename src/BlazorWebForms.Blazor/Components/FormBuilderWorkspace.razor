@@ -228,6 +228,10 @@ else
                                     <span>Prefill key</span>
                                     <input class="bwf-input" @bind="field.Prefill.Key" placeholder="email, displayName, department" />
                                 </label>
+                                <label>
+                                    <span>Prefill provider key</span>
+                                    <input class="bwf-input" @bind="field.Prefill.ProviderKey" placeholder="claim, employee, hr-db" />
+                                </label>
                                 <label class="bwf-checkbox">
                                     <input type="checkbox" @bind="field.Prefill.ApplyWhenEmpty" />
                                     <span>Only prefill empty answers</span>

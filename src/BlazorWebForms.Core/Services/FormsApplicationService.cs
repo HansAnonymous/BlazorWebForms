@@ -10,7 +10,7 @@ public sealed class FormsApplicationService(
     IFormDefinitionSerializer serializer,
     IPermissionEvaluator permissionEvaluator,
     ICurrentUserContext currentUserContext,
-    IEmployeePrefillProvider employeePrefillProvider,
+    IEnumerable<IFormPrefillProvider> prefillProviders,
     IEmailNotifier emailNotifier,
     IFileStorage fileStorage,
     IPdfExporter pdfExporter,
@@ -173,34 +173,7 @@ public sealed class FormsApplicationService(
         string? employeeEmail = null,
         CancellationToken cancellationToken = default)
     {
-        var user = currentUserContext.GetCurrentUser();
-        var answers = existingAnswers is null
-            ? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
-            : new Dictionary<string, string?>(existingAnswers, StringComparer.OrdinalIgnoreCase);
-
-        var fields = definition.Sections.SelectMany(section => section.Fields).ToList();
-        var needsEmployeeData = fields.Any(field => field.Prefill.Source == PrefillSourceKind.Employee);
-        var employeeData = needsEmployeeData
-            ? await employeePrefillProvider.GetEmployeeDataAsync(user, employeeEmail ?? user.Email, cancellationToken)
-            : new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var field in fields)
-        {
-            if (field.Prefill.ApplyWhenEmpty &&
-                answers.TryGetValue(field.Id, out var existingValue) &&
-                !string.IsNullOrWhiteSpace(existingValue))
-            {
-                continue;
-            }
-
-            var value = ResolvePrefillValue(field, user, employeeData);
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                answers[field.Id] = value;
-            }
-        }
-
-        return answers;
+        return await ResolvePrefillAnswersCoreAsync(definition, existingAnswers, employeeEmail, includeClaimProviders: true, cancellationToken);
     }
 
     public async Task<EntryRecord> CreateManagerPrefilledDraftAsync(Guid formId, ManagerPrefillDraftRequest request, CancellationToken cancellationToken = default)
@@ -222,23 +195,12 @@ public sealed class FormsApplicationService(
         var version = form.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault()
                       ?? throw new InvalidOperationException("Form has not been published.");
         var definition = serializer.Deserialize(version.DefinitionJson);
-        var employeeData = await employeePrefillProvider.GetEmployeeDataAsync(manager, request.SubmitterEmail.Trim(), cancellationToken);
-        var answers = new Dictionary<string, string?>(request.Answers, StringComparer.OrdinalIgnoreCase);
-
-        foreach (var field in definition.Sections.SelectMany(section => section.Fields).Where(field => field.Prefill.Source == PrefillSourceKind.Employee))
-        {
-            if (field.Prefill.ApplyWhenEmpty &&
-                answers.TryGetValue(field.Id, out var existingValue) &&
-                !string.IsNullOrWhiteSpace(existingValue))
-            {
-                continue;
-            }
-
-            if (employeeData.TryGetValue(field.Prefill.Key, out var value) && !string.IsNullOrWhiteSpace(value))
-            {
-                answers[field.Id] = value;
-            }
-        }
+        var answers = await ResolvePrefillAnswersCoreAsync(
+            definition,
+            request.Answers,
+            request.SubmitterEmail.Trim(),
+            includeClaimProviders: false,
+            cancellationToken);
 
         var entry = new EntryRecord
         {
@@ -1039,28 +1001,80 @@ public sealed class FormsApplicationService(
         return form;
     }
 
-    private static string? ResolvePrefillValue(FormFieldDefinition field, UserProfile user, IReadOnlyDictionary<string, string?> employeeData)
+    private async Task<Dictionary<string, string?>> ResolvePrefillAnswersCoreAsync(
+        FormDefinition definition,
+        IReadOnlyDictionary<string, string?>? existingAnswers,
+        string? subjectEmail,
+        bool includeClaimProviders,
+        CancellationToken cancellationToken)
     {
-        return field.Prefill.Source switch
+        var user = currentUserContext.GetCurrentUser();
+        var answers = existingAnswers is null
+            ? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string?>(existingAnswers, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var field in definition.Sections.SelectMany(section => section.Fields))
         {
-            PrefillSourceKind.Claim => ResolveClaimPrefillValue(user, field.Prefill.Key),
-            PrefillSourceKind.Employee => employeeData.TryGetValue(field.Prefill.Key, out var value) ? value : null,
-            PrefillSourceKind.FixedValue => field.DefaultValue,
-            _ => field.DefaultValue
-        };
+            if (field.Prefill.ApplyWhenEmpty &&
+                answers.TryGetValue(field.Id, out var existingValue) &&
+                !string.IsNullOrWhiteSpace(existingValue))
+            {
+                continue;
+            }
+
+            var value = await ResolvePrefillValueAsync(definition, field, user, answers, subjectEmail, includeClaimProviders, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                answers[field.Id] = value;
+            }
+        }
+
+        return answers;
     }
 
-    private static string? ResolveClaimPrefillValue(UserProfile user, string key)
+    private async Task<string?> ResolvePrefillValueAsync(
+        FormDefinition definition,
+        FormFieldDefinition field,
+        UserProfile user,
+        IReadOnlyDictionary<string, string?> answers,
+        string? subjectEmail,
+        bool includeClaimProviders,
+        CancellationToken cancellationToken)
     {
-        return key.Trim().ToLowerInvariant() switch
+        if (!includeClaimProviders && field.Prefill.Source == PrefillSourceKind.Claim)
         {
-            "name" or "displayname" or "display_name" => user.DisplayName,
-            "email" or "mail" => user.Email,
-            "userid" or "user_id" or "sub" or "nameidentifier" => user.UserId.ToString(),
-            "isauthenticated" or "is_authenticated" => user.IsAuthenticated.ToString(CultureInfo.InvariantCulture),
-            "roles" or "role" => string.Join(",", user.Roles),
-            _ => null
-        };
+            return null;
+        }
+
+        var provider = prefillProviders.FirstOrDefault(provider =>
+            ProviderMatches(field.Prefill, provider) &&
+            provider.CanResolve(field.Prefill));
+
+        if (provider is null)
+        {
+            return null;
+        }
+
+        return await provider.ResolveAsync(new FormPrefillRequest
+        {
+            Definition = definition,
+            Field = field,
+            Requester = user,
+            SubjectEmail = subjectEmail,
+            ExistingAnswers = answers
+        }, cancellationToken);
+    }
+
+    private static bool ProviderMatches(FormFieldPrefillDefinition prefill, IFormPrefillProvider provider)
+    {
+        if (prefill.Source == PrefillSourceKind.Custom)
+        {
+            return !string.IsNullOrWhiteSpace(prefill.ProviderKey) &&
+                   string.Equals(prefill.ProviderKey, provider.ProviderKey, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return string.IsNullOrWhiteSpace(prefill.ProviderKey) ||
+               string.Equals(prefill.ProviderKey, provider.ProviderKey, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void ValidateDefinitionForPublish(FormDefinition definition)
@@ -1143,6 +1157,11 @@ public sealed class FormsApplicationService(
                 if ((field.Prefill.Source is PrefillSourceKind.Claim or PrefillSourceKind.Employee) && string.IsNullOrWhiteSpace(field.Prefill.Key))
                 {
                     throw new InvalidOperationException($"Field '{field.Label}' prefill key is required.");
+                }
+
+                if (field.Prefill.Source == PrefillSourceKind.Custom && string.IsNullOrWhiteSpace(field.Prefill.ProviderKey))
+                {
+                    throw new InvalidOperationException($"Field '{field.Label}' custom prefill provider key is required.");
                 }
 
                 if (field.Kind is FormFieldKind.Select or FormFieldKind.Radio)

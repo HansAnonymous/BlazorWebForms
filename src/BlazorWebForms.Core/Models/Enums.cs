@@ -20,7 +20,8 @@ public enum PrefillSourceKind
     None,
     Claim,
     Employee,
-    FixedValue
+    FixedValue,
+    Custom
 }
 
 public enum FormAccessMode

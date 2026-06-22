@@ -814,6 +814,12 @@ internal static class IsolatedUnitTests
                         },
                         new FormFieldDefinition
                         {
+                            Id = "costCenter",
+                            Label = "Cost center",
+                            Prefill = new FormFieldPrefillDefinition { Source = PrefillSourceKind.Custom, ProviderKey = "hr-database", Key = "costCenter" }
+                        },
+                        new FormFieldDefinition
+                        {
                             Id = "location",
                             Label = "Location",
                             DefaultValue = "Remote",
@@ -846,6 +852,7 @@ internal static class IsolatedUnitTests
         Assert(resolved["employeeName"] == "Isolated Test User", "Claim prefill resolves display name.");
         Assert(resolved["employeeEmail"] == "test@example.com", "Claim prefill resolves email.");
         Assert(resolved["department"] == "Existing", "Prefill preserves existing answers by default.");
+        Assert(resolved["costCenter"] == "CC-42", "Custom provider prefill resolves database-backed values.");
         Assert(resolved["location"] == "Remote", "Fixed prefill resolves field default value.");
 
         definition.Sections[0].Fields.First(f => f.Id == "department").Prefill.ApplyWhenEmpty = false;
@@ -876,6 +883,7 @@ internal static class IsolatedUnitTests
         var savedDraft = await repo.GetDraftEntryAsync(form.Id, "employee@example.com");
         Assert(savedDraft is not null && savedDraft.Id == draft.Id, "Manager-prefilled draft routes to submitter email.");
         Assert(draft.Answers["department"] == "Engineering", "Manager-prefilled draft includes employee data.");
+        Assert(draft.Answers["costCenter"] == "CC-42", "Manager-prefilled draft includes custom provider data.");
         Assert(draft.Answers["managerNote"] == "Ready", "Manager-prefilled draft preserves manager answers.");
         Assert(draft.ApprovalSteps.Count == 1, "Manager-prefilled draft stores approver routing.");
         Assert(draft.Status == EntryStatus.Draft, "Manager-prefilled draft remains a draft.");
@@ -926,6 +934,7 @@ internal static class IsolatedUnitTests
         services.AddSingleton<IFormsRepository>(repo);
         services.AddSingleton<ICurrentUserContext, TestAuthenticatedUserContext>();
         services.AddSingleton<IEmployeePrefillProvider, TestEmployeePrefillProvider>();
+        services.AddSingleton<IFormPrefillProvider, TestDatabasePrefillProvider>();
         services.AddSingleton<IEmailNotifier, TestFakeEmailNotifier>();
         services.AddSingleton<IFileStorage, TestFakeFileStorage>();
         services.AddSingleton<IPdfExporter, TestFakePdfExporter>();
@@ -1029,6 +1038,26 @@ internal sealed class TestEmployeePrefillProvider : IEmployeePrefillProvider
             ["department"] = "Engineering",
             ["employeeNumber"] = "E-123"
         });
+}
+
+internal sealed class TestDatabasePrefillProvider : IFormPrefillProvider
+{
+    public string ProviderKey => "hr-database";
+
+    public bool CanResolve(FormFieldPrefillDefinition prefill) =>
+        prefill.Source == PrefillSourceKind.Custom;
+
+    public Task<string?> ResolveAsync(FormPrefillRequest request, CancellationToken cancellationToken = default)
+    {
+        var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["costCenter"] = "CC-42",
+            ["managerName"] = "Database Manager"
+        };
+
+        values.TryGetValue(request.Field.Prefill.Key, out var value);
+        return Task.FromResult(value);
+    }
 }
 
 internal sealed class TestFakeRepository : IFormsRepository

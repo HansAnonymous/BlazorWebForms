@@ -48,6 +48,13 @@ public interface IEmployeePrefillProvider
     Task<IReadOnlyDictionary<string, string?>> GetEmployeeDataAsync(UserProfile requester, string employeeEmail, CancellationToken cancellationToken = default);
 }
 
+public interface IFormPrefillProvider
+{
+    string ProviderKey { get; }
+    bool CanResolve(FormFieldPrefillDefinition prefill);
+    Task<string?> ResolveAsync(FormPrefillRequest request, CancellationToken cancellationToken = default);
+}
+
 public interface IEmailIntegration
 {
     Task SendAsync(string to, string subject, string body, CancellationToken cancellationToken = default);
