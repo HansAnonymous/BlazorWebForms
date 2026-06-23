@@ -99,7 +99,8 @@ else
             {
                 DraftEntryId = draft.Id;
                 Answers.Clear();
-                foreach (var pair in draft.Answers)
+                var prefilledDraftAnswers = await FormsService.ResolvePrefillAnswersAsync(ViewModel.Definition, draft.Answers, draft.SubmittedByEmail);
+                foreach (var pair in prefilledDraftAnswers)
                 {
                     Answers[pair.Key] = pair.Value;
                 }
@@ -116,6 +117,15 @@ else
                 }
 
                 StatusMessage = $"Loaded existing draft {draft.Id}.";
+            }
+            else
+            {
+                Answers.Clear();
+                var prefilledAnswers = await FormsService.ResolvePrefillAnswersAsync(ViewModel.Definition);
+                foreach (var pair in prefilledAnswers)
+                {
+                    Answers[pair.Key] = pair.Value;
+                }
             }
         }
     }

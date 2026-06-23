@@ -11,7 +11,17 @@ public enum FormFieldKind
     Date,
     File,
     RichText,
-    Signature
+    Signature,
+    RepeatableList
+}
+
+public enum PrefillSourceKind
+{
+    None,
+    Claim,
+    Employee,
+    FixedValue,
+    Custom
 }
 
 public enum FormAccessMode

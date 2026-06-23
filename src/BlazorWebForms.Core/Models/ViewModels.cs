@@ -58,6 +58,25 @@ public sealed class SaveDraftSubmissionRequest
     public List<SubmittedFileInput> Files { get; set; } = [];
 }
 
+public sealed class FormPrefillRequest
+{
+    public required FormDefinition Definition { get; init; }
+    public required FormFieldDefinition Field { get; init; }
+    public required UserProfile Requester { get; init; }
+    public string? SubjectEmail { get; init; }
+    public IReadOnlyDictionary<string, string?> ExistingAnswers { get; init; } =
+        new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+}
+
+public sealed class ManagerPrefillDraftRequest
+{
+    public string SubmitterName { get; set; } = string.Empty;
+    public string SubmitterEmail { get; set; } = string.Empty;
+    public Dictionary<string, string?> Answers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public List<ApproverInput> Approvers { get; set; } = [];
+    public List<SubmittedFileInput> Files { get; set; } = [];
+}
+
 public sealed class SubmittedFileInput
 {
     public string FieldId { get; set; } = string.Empty;

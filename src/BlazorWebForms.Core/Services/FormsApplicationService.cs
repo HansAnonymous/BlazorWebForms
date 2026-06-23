@@ -10,6 +10,7 @@ public sealed class FormsApplicationService(
     IFormDefinitionSerializer serializer,
     IPermissionEvaluator permissionEvaluator,
     ICurrentUserContext currentUserContext,
+    IEnumerable<IFormPrefillProvider> prefillProviders,
     IEmailNotifier emailNotifier,
     IFileStorage fileStorage,
     IPdfExporter pdfExporter,
@@ -164,6 +165,77 @@ public sealed class FormsApplicationService(
 
         metadataCache.SetPublishedForm(slug, viewModel);
         return viewModel;
+    }
+
+    public async Task<Dictionary<string, string?>> ResolvePrefillAnswersAsync(
+        FormDefinition definition,
+        IReadOnlyDictionary<string, string?>? existingAnswers = null,
+        string? employeeEmail = null,
+        CancellationToken cancellationToken = default)
+    {
+        return await ResolvePrefillAnswersCoreAsync(definition, existingAnswers, employeeEmail, includeClaimProviders: true, cancellationToken);
+    }
+
+    public async Task<EntryRecord> CreateManagerPrefilledDraftAsync(Guid formId, ManagerPrefillDraftRequest request, CancellationToken cancellationToken = default)
+    {
+        var form = await repository.GetFormAsync(formId, cancellationToken)
+                   ?? throw new InvalidOperationException("Form not found.");
+        var manager = currentUserContext.GetCurrentUser();
+
+        if (!permissionEvaluator.CanManageForm(form, manager))
+        {
+            throw new InvalidOperationException("Current user cannot prefill drafts for this form.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.SubmitterEmail))
+        {
+            throw new InvalidOperationException("Submitter email is required for manager-prefilled drafts.");
+        }
+
+        var version = form.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault()
+                      ?? throw new InvalidOperationException("Form has not been published.");
+        var definition = serializer.Deserialize(version.DefinitionJson);
+        var answers = await ResolvePrefillAnswersCoreAsync(
+            definition,
+            request.Answers,
+            request.SubmitterEmail.Trim(),
+            includeClaimProviders: false,
+            cancellationToken);
+
+        var entry = new EntryRecord
+        {
+            FormId = form.Id,
+            FormVersionId = version.Id,
+            SubmittedBy = string.IsNullOrWhiteSpace(request.SubmitterName) ? request.SubmitterEmail.Trim() : request.SubmitterName.Trim(),
+            SubmittedByEmail = request.SubmitterEmail.Trim(),
+            SubmittedUtc = DateTimeOffset.UtcNow,
+            Status = EntryStatus.Draft,
+            Answers = answers
+        };
+        var revisionNumber = entry.Revisions.Count + 1;
+        entry.Files = EntryFileMapper.MapFiles(request.Files, manager.UserId, manager.Email, revisionNumber);
+        EntryFileMapper.ApplyFileAnswers(entry.Answers, request.Files);
+        entry.SearchIndex = SearchIndexBuilder.Build(definition, entry.Answers);
+        entry.ApprovalSteps = request.Approvers
+            .Where(approver => !string.IsNullOrWhiteSpace(approver.Email))
+            .Select((approver, index) => new ApprovalStepRecord
+            {
+                Order = index + 1,
+                ApproverName = approver.Name,
+                ApproverEmail = approver.Email
+            })
+            .ToList();
+        entry.Revisions.Add(new EntryRevisionRecord
+        {
+            RevisionNumber = revisionNumber,
+            EditedBy = manager.DisplayName,
+            EditedUtc = entry.SubmittedUtc,
+            Answers = new Dictionary<string, string?>(entry.Answers, StringComparer.OrdinalIgnoreCase)
+        });
+
+        await repository.SaveEntryAsync(entry, cancellationToken);
+        metadataCache.InvalidateForms();
+        return entry;
     }
 
     public async Task<EntryRecord> SubmitEntryAsync(Guid formId, SubmitEntryRequest request, CancellationToken cancellationToken = default)
@@ -929,6 +1001,82 @@ public sealed class FormsApplicationService(
         return form;
     }
 
+    private async Task<Dictionary<string, string?>> ResolvePrefillAnswersCoreAsync(
+        FormDefinition definition,
+        IReadOnlyDictionary<string, string?>? existingAnswers,
+        string? subjectEmail,
+        bool includeClaimProviders,
+        CancellationToken cancellationToken)
+    {
+        var user = currentUserContext.GetCurrentUser();
+        var answers = existingAnswers is null
+            ? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            : new Dictionary<string, string?>(existingAnswers, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var field in definition.Sections.SelectMany(section => section.Fields))
+        {
+            if (field.Prefill.ApplyWhenEmpty &&
+                answers.TryGetValue(field.Id, out var existingValue) &&
+                !string.IsNullOrWhiteSpace(existingValue))
+            {
+                continue;
+            }
+
+            var value = await ResolvePrefillValueAsync(definition, field, user, answers, subjectEmail, includeClaimProviders, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                answers[field.Id] = value;
+            }
+        }
+
+        return answers;
+    }
+
+    private async Task<string?> ResolvePrefillValueAsync(
+        FormDefinition definition,
+        FormFieldDefinition field,
+        UserProfile user,
+        IReadOnlyDictionary<string, string?> answers,
+        string? subjectEmail,
+        bool includeClaimProviders,
+        CancellationToken cancellationToken)
+    {
+        if (!includeClaimProviders && field.Prefill.Source == PrefillSourceKind.Claim)
+        {
+            return null;
+        }
+
+        var provider = prefillProviders.FirstOrDefault(provider =>
+            ProviderMatches(field.Prefill, provider) &&
+            provider.CanResolve(field.Prefill));
+
+        if (provider is null)
+        {
+            return null;
+        }
+
+        return await provider.ResolveAsync(new FormPrefillRequest
+        {
+            Definition = definition,
+            Field = field,
+            Requester = user,
+            SubjectEmail = subjectEmail,
+            ExistingAnswers = answers
+        }, cancellationToken);
+    }
+
+    private static bool ProviderMatches(FormFieldPrefillDefinition prefill, IFormPrefillProvider provider)
+    {
+        if (prefill.Source == PrefillSourceKind.Custom)
+        {
+            return !string.IsNullOrWhiteSpace(prefill.ProviderKey) &&
+                   string.Equals(prefill.ProviderKey, provider.ProviderKey, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return string.IsNullOrWhiteSpace(prefill.ProviderKey) ||
+               string.Equals(prefill.ProviderKey, provider.ProviderKey, StringComparison.OrdinalIgnoreCase);
+    }
+
     private static void ValidateDefinitionForPublish(FormDefinition definition)
     {
         if (definition.SchemaVersion <= 0 || definition.SchemaVersion > FormDefinition.CurrentSchemaVersion)
@@ -986,6 +1134,34 @@ public sealed class FormsApplicationService(
                     {
                         throw new InvalidOperationException($"Field '{field.Label}' has an invalid regex pattern.");
                     }
+                }
+
+                if (field.Kind == FormFieldKind.RepeatableList)
+                {
+                    if (field.MinItems is < 0)
+                    {
+                        throw new InvalidOperationException($"Field '{field.Label}' minimum item count cannot be negative.");
+                    }
+
+                    if (field.MaxItems is < 1)
+                    {
+                        throw new InvalidOperationException($"Field '{field.Label}' maximum item count must be at least one.");
+                    }
+
+                    if (field.MinItems.HasValue && field.MaxItems.HasValue && field.MinItems.Value > field.MaxItems.Value)
+                    {
+                        throw new InvalidOperationException($"Field '{field.Label}' minimum item count cannot exceed maximum item count.");
+                    }
+                }
+
+                if ((field.Prefill.Source is PrefillSourceKind.Claim or PrefillSourceKind.Employee) && string.IsNullOrWhiteSpace(field.Prefill.Key))
+                {
+                    throw new InvalidOperationException($"Field '{field.Label}' prefill key is required.");
+                }
+
+                if (field.Prefill.Source == PrefillSourceKind.Custom && string.IsNullOrWhiteSpace(field.Prefill.ProviderKey))
+                {
+                    throw new InvalidOperationException($"Field '{field.Label}' custom prefill provider key is required.");
                 }
 
                 if (field.Kind is FormFieldKind.Select or FormFieldKind.Radio)

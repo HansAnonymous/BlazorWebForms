@@ -2,7 +2,7 @@ namespace BlazorWebForms.Core.Models;
 
 public sealed class FormDefinition
 {
-    public static int CurrentSchemaVersion => 2;
+    public static int CurrentSchemaVersion => 3;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public string Title { get; set; } = string.Empty;
@@ -49,12 +49,18 @@ public sealed class FormFieldDefinition
     public string HelpText { get; set; } = string.Empty;
     public bool Required { get; set; }
     public bool Searchable { get; set; }
+    public bool ReadOnly { get; set; }
     public string? RegexPattern { get; set; }
     public string? DefaultValue { get; set; }
     public string? ValidationHint { get; set; }
+    public FormFieldPrefillDefinition Prefill { get; set; } = new();
     public string? VisibilityCondition { get; set; }
     public VisibilityConditionDefinition? VisibilityRules { get; set; }
     public FormFieldLayoutDefinition? Layout { get; set; } = new();
+    public string RepeatableItemLabel { get; set; } = "Item";
+    public string RepeatableAddButtonText { get; set; } = "Add item";
+    public int? MinItems { get; set; }
+    public int? MaxItems { get; set; }
     public Dictionary<string, string> LocalizedLabels { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> LocalizedPlaceholders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> LocalizedHelpTexts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -64,6 +70,14 @@ public sealed class FormFieldDefinition
     public List<string> AllowedMimeTypes { get; set; } = [];
     public List<string> AllowedExtensions { get; set; } = [];
     public List<FormFieldOption> Options { get; set; } = [];
+}
+
+public sealed class FormFieldPrefillDefinition
+{
+    public PrefillSourceKind Source { get; set; } = PrefillSourceKind.None;
+    public string ProviderKey { get; set; } = string.Empty;
+    public string Key { get; set; } = string.Empty;
+    public bool ApplyWhenEmpty { get; set; } = true;
 }
 
 public sealed class FormFieldOption
@@ -96,4 +110,11 @@ public sealed class FormFieldLayoutDefinition
 {
     public string WidthHint { get; set; } = "Auto";
     public string? Group { get; set; }
+}
+
+public sealed class SignatureFieldValue
+{
+    public string SignerName { get; set; } = string.Empty;
+    public bool Confirmed { get; set; }
+    public DateTimeOffset? SignedUtc { get; set; }
 }

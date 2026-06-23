@@ -12,6 +12,7 @@ internal static class IsolatedUnitTests
         await RunPublishValidationTests();
         await RunServiceEdgeCaseTests();
         await RunInvitationWorkflowErrorPathTests();
+        await RunPrefillWorkflowTests();
         Console.WriteLine("Isolated unit tests passed.");
     }
 
@@ -776,6 +777,120 @@ internal static class IsolatedUnitTests
         Console.WriteLine("  Invitation and workflow error path tests passed.");
     }
 
+    private static async Task RunPrefillWorkflowTests()
+    {
+        var (app, repo) = BuildServiceWithFakes();
+        var definition = new FormDefinition
+        {
+            Title = "Prefill test",
+            DefaultCulture = "en-US",
+            Sections =
+            [
+                new FormSectionDefinition
+                {
+                    Id = "employee",
+                    Title = "Employee",
+                    Fields =
+                    [
+                        new FormFieldDefinition
+                        {
+                            Id = "employeeName",
+                            Label = "Employee name",
+                            Prefill = new FormFieldPrefillDefinition { Source = PrefillSourceKind.Claim, Key = "displayName" }
+                        },
+                        new FormFieldDefinition
+                        {
+                            Id = "employeeEmail",
+                            Label = "Employee email",
+                            ReadOnly = true,
+                            Prefill = new FormFieldPrefillDefinition { Source = PrefillSourceKind.Claim, Key = "email" }
+                        },
+                        new FormFieldDefinition
+                        {
+                            Id = "department",
+                            Label = "Department",
+                            Searchable = true,
+                            Prefill = new FormFieldPrefillDefinition { Source = PrefillSourceKind.Employee, Key = "department" }
+                        },
+                        new FormFieldDefinition
+                        {
+                            Id = "costCenter",
+                            Label = "Cost center",
+                            Prefill = new FormFieldPrefillDefinition { Source = PrefillSourceKind.Custom, ProviderKey = "hr-database", Key = "costCenter" }
+                        },
+                        new FormFieldDefinition
+                        {
+                            Id = "location",
+                            Label = "Location",
+                            DefaultValue = "Remote",
+                            Prefill = new FormFieldPrefillDefinition { Source = PrefillSourceKind.FixedValue }
+                        },
+                        new FormFieldDefinition
+                        {
+                            Id = "repeatable",
+                            Label = "Repeatable",
+                            Kind = FormFieldKind.RepeatableList,
+                            MinItems = 1,
+                            MaxItems = 3
+                        },
+                        new FormFieldDefinition
+                        {
+                            Id = "signature",
+                            Label = "Signature",
+                            Kind = FormFieldKind.Signature
+                        }
+                    ]
+                }
+            ]
+        };
+
+        var resolved = await app.ResolvePrefillAnswersAsync(
+            definition,
+            new Dictionary<string, string?> { ["department"] = "Existing" },
+            "employee@example.com");
+
+        Assert(resolved["employeeName"] == "Isolated Test User", "Claim prefill resolves display name.");
+        Assert(resolved["employeeEmail"] == "test@example.com", "Claim prefill resolves email.");
+        Assert(resolved["department"] == "Existing", "Prefill preserves existing answers by default.");
+        Assert(resolved["costCenter"] == "CC-42", "Custom provider prefill resolves database-backed values.");
+        Assert(resolved["location"] == "Remote", "Fixed prefill resolves field default value.");
+
+        definition.Sections[0].Fields.First(f => f.Id == "department").Prefill.ApplyWhenEmpty = false;
+        var overwritten = await app.ResolvePrefillAnswersAsync(
+            definition,
+            new Dictionary<string, string?> { ["department"] = "Existing" },
+            "employee@example.com");
+        Assert(overwritten["department"] == "Engineering", "Employee prefill can overwrite existing answers.");
+
+        var form = await app.SaveDraftAsync(new SaveDraftRequest
+        {
+            Name = "Prefill workflow",
+            Description = "Manager prefill routing",
+            Slug = "prefill-workflow",
+            AccessMode = FormAccessMode.Authenticated,
+            Definition = definition
+        });
+        await app.PublishAsync(form.Id);
+
+        var draft = await app.CreateManagerPrefilledDraftAsync(form.Id, new ManagerPrefillDraftRequest
+        {
+            SubmitterName = "Employee One",
+            SubmitterEmail = "employee@example.com",
+            Answers = new Dictionary<string, string?> { ["managerNote"] = "Ready" },
+            Approvers = [new ApproverInput { Name = "Approver One", Email = "approver@example.com" }]
+        });
+
+        var savedDraft = await repo.GetDraftEntryAsync(form.Id, "employee@example.com");
+        Assert(savedDraft is not null && savedDraft.Id == draft.Id, "Manager-prefilled draft routes to submitter email.");
+        Assert(draft.Answers["department"] == "Engineering", "Manager-prefilled draft includes employee data.");
+        Assert(draft.Answers["costCenter"] == "CC-42", "Manager-prefilled draft includes custom provider data.");
+        Assert(draft.Answers["managerNote"] == "Ready", "Manager-prefilled draft preserves manager answers.");
+        Assert(draft.ApprovalSteps.Count == 1, "Manager-prefilled draft stores approver routing.");
+        Assert(draft.Status == EntryStatus.Draft, "Manager-prefilled draft remains a draft.");
+
+        Console.WriteLine("  Prefill workflow tests passed.");
+    }
+
     // ───────────────────────────────────────────────
     //  Helpers
     // ───────────────────────────────────────────────
@@ -818,6 +933,8 @@ internal static class IsolatedUnitTests
         services.AddBlazorWebFormsCore();
         services.AddSingleton<IFormsRepository>(repo);
         services.AddSingleton<ICurrentUserContext, TestAuthenticatedUserContext>();
+        services.AddSingleton<IEmployeePrefillProvider, TestEmployeePrefillProvider>();
+        services.AddSingleton<IFormPrefillProvider, TestDatabasePrefillProvider>();
         services.AddSingleton<IEmailNotifier, TestFakeEmailNotifier>();
         services.AddSingleton<IFileStorage, TestFakeFileStorage>();
         services.AddSingleton<IPdfExporter, TestFakePdfExporter>();
@@ -911,6 +1028,36 @@ internal sealed class TestAnonymousUserContext : ICurrentUserContext
             Email = string.Empty,
             Roles = []
         };
+}
+
+internal sealed class TestEmployeePrefillProvider : IEmployeePrefillProvider
+{
+    public Task<IReadOnlyDictionary<string, string?>> GetEmployeeDataAsync(UserProfile requester, string employeeEmail, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyDictionary<string, string?>>(new Dictionary<string, string?>
+        {
+            ["department"] = "Engineering",
+            ["employeeNumber"] = "E-123"
+        });
+}
+
+internal sealed class TestDatabasePrefillProvider : IFormPrefillProvider
+{
+    public string ProviderKey => "hr-database";
+
+    public bool CanResolve(FormFieldPrefillDefinition prefill) =>
+        prefill.Source == PrefillSourceKind.Custom;
+
+    public Task<string?> ResolveAsync(FormPrefillRequest request, CancellationToken cancellationToken = default)
+    {
+        var values = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["costCenter"] = "CC-42",
+            ["managerName"] = "Database Manager"
+        };
+
+        values.TryGetValue(request.Field.Prefill.Key, out var value);
+        return Task.FromResult(value);
+    }
 }
 
 internal sealed class TestFakeRepository : IFormsRepository

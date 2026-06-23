@@ -149,6 +149,7 @@ else
                             <button class="bwf-button" @onclick="() => AddField(section, FormFieldKind.Text)">Text</button>
                             <button class="bwf-button" @onclick="() => AddField(section, FormFieldKind.TextArea)">Textarea</button>
                             <button class="bwf-button" @onclick="() => AddField(section, FormFieldKind.Select)">Select</button>
+                            <button class="bwf-button" @onclick="() => AddField(section, FormFieldKind.RepeatableList)">Repeatable list</button>
                             <button class="bwf-button" @onclick="() => AddField(section, FormFieldKind.Signature)">Signature</button>
                             <button class="bwf-button" @onclick="() => MoveSection(sectionIndex, -1)" disabled="@(sectionIndex == 0)">Move up</button>
                             <button class="bwf-button" @onclick="() => MoveSection(sectionIndex, 1)" disabled="@(sectionIndex == State.Form.DraftDefinition.Sections.Count - 1)">Move down</button>
@@ -183,6 +184,10 @@ else
                                     <input type="checkbox" @bind="field.Searchable" />
                                     <span>Search</span>
                                 </label>
+                                <label class="bwf-checkbox">
+                                    <input type="checkbox" @bind="field.ReadOnly" />
+                                    <span>Read-only</span>
+                                </label>
 
                                 <button class="bwf-button" @onclick="() => MoveField(section, fieldIndex, -1)" disabled="@(fieldIndex == 0)">Up</button>
                                 <button class="bwf-button" @onclick="() => MoveField(section, fieldIndex, 1)" disabled="@(fieldIndex == section.Fields.Count - 1)">Down</button>
@@ -209,6 +214,27 @@ else
                                 <label>
                                     <span>Default value</span>
                                     <input class="bwf-input" @bind="field.DefaultValue" />
+                                </label>
+                                <label>
+                                    <span>Prefill source</span>
+                                    <select class="bwf-input" @bind="field.Prefill.Source">
+                                        @foreach (var source in Enum.GetValues<PrefillSourceKind>())
+                                        {
+                                            <option value="@source">@source</option>
+                                        }
+                                    </select>
+                                </label>
+                                <label>
+                                    <span>Prefill key</span>
+                                    <input class="bwf-input" @bind="field.Prefill.Key" placeholder="email, displayName, department" />
+                                </label>
+                                <label>
+                                    <span>Prefill provider key</span>
+                                    <input class="bwf-input" @bind="field.Prefill.ProviderKey" placeholder="claim, employee, hr-db" />
+                                </label>
+                                <label class="bwf-checkbox">
+                                    <input type="checkbox" @bind="field.Prefill.ApplyWhenEmpty" />
+                                    <span>Only prefill empty answers</span>
                                 </label>
                                 <label>
                                     <span>Validation hint</span>
@@ -273,6 +299,28 @@ else
                                 </label>
                             }
 
+                            @if (field.Kind is FormFieldKind.RepeatableList)
+                            {
+                                <div class="bwf-grid">
+                                    <label>
+                                        <span>Item label</span>
+                                        <input class="bwf-input" @bind="field.RepeatableItemLabel" placeholder="Item" />
+                                    </label>
+                                    <label>
+                                        <span>Add button text</span>
+                                        <input class="bwf-input" @bind="field.RepeatableAddButtonText" placeholder="Add item" />
+                                    </label>
+                                    <label>
+                                        <span>Minimum items</span>
+                                        <input class="bwf-input" type="number" min="0" value="@GetNullableIntValue(field.MinItems)" @onchange="e => field.MinItems = ParseNullableInt(e.Value?.ToString())" />
+                                    </label>
+                                    <label>
+                                        <span>Maximum items</span>
+                                        <input class="bwf-input" type="number" min="1" value="@GetNullableIntValue(field.MaxItems)" @onchange="e => field.MaxItems = ParseNullableInt(e.Value?.ToString())" />
+                                    </label>
+                                </div>
+                            }
+
                             @if (PendingFieldDeleteId == field.Id)
                             {
                                 <div class="bwf-help">
@@ -293,18 +341,18 @@ else
 
             <section class="bwf-panel" style="margin-top: 1rem;">
                 <h4>Visibility diagnostics</h4>
-                @foreach (var section in State.Form.DraftDefinition.Sections)
+                @foreach (var diagSection in State.Form.DraftDefinition.Sections)
                 {
-                    var sectionVisible = IsSectionVisible(section);
+                    var sectionVisible = IsSectionVisible(diagSection);
                     <div class="bwf-help">
-                        Section <strong>@section.Title</strong>: @(sectionVisible ? "Visible" : "Hidden")
+                        Section <strong>@diagSection.Title</strong>: @(sectionVisible ? "Visible" : "Hidden")
                     </div>
 
-                    @foreach (var field in section.Fields)
+                    @foreach (var diagField in diagSection.Fields)
                     {
-                        var fieldVisible = IsFieldVisible(field);
+                        var fieldVisible = IsFieldVisible(diagField);
                         <div class="bwf-help" style="margin-left: 1rem;">
-                            Field <strong>@field.Label</strong>: @(fieldVisible ? "Visible" : "Hidden")
+                            Field <strong>@diagField.Label</strong>: @(fieldVisible ? "Visible" : "Hidden")
                         </div>
                     }
                 }
@@ -513,6 +561,13 @@ else
     private static string GetLocalizationLines(IReadOnlyDictionary<string, string> map)
     {
         return string.Join(Environment.NewLine, map.Select(kv => $"{kv.Key}|{kv.Value}"));
+    }
+
+    private static string GetNullableIntValue(int? value) => value?.ToString() ?? string.Empty;
+
+    private static int? ParseNullableInt(string? value)
+    {
+        return int.TryParse(value, out var parsed) ? parsed : null;
     }
 
     private static void SetLocalizationLines(Dictionary<string, string> map, string? value)
@@ -768,6 +823,16 @@ else
                 new FormFieldOption { Value = "option-1", Label = "Option 1" },
                 new FormFieldOption { Value = "option-2", Label = "Option 2" }
             ];
+        }
+        else if (kind is FormFieldKind.RepeatableList)
+        {
+            field.RepeatableItemLabel = "Item";
+            field.RepeatableAddButtonText = "Add item";
+            field.MinItems = 1;
+        }
+        else if (kind is FormFieldKind.Signature)
+        {
+            field.HelpText = "Type your name and confirm the signature.";
         }
 
         section.Fields.Add(field);

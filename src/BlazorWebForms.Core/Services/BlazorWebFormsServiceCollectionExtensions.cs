@@ -13,11 +13,21 @@ public static class BlazorWebFormsServiceCollectionExtensions
         services.AddSingleton<IConditionEvaluator, SimpleConditionEvaluator>();
         services.AddSingleton<IPermissionEvaluator, DefaultPermissionEvaluator>();
         services.AddSingleton<ICoreMetadataCache, InMemoryCoreMetadataCache>();
+        services.TryAddSingleton<IEmployeePrefillProvider, NoOpEmployeePrefillProvider>();
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IFormPrefillProvider, ClaimFormPrefillProvider>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IFormPrefillProvider, EmployeeFormPrefillProvider>());
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IFormPrefillProvider, FixedValueFormPrefillProvider>());
         services.TryAddSingleton<IAntiAbuseGuard, NoOpAntiAbuseGuard>();
         services.TryAddSingleton<IOperationalTelemetry, NoOpOperationalTelemetry>();
         services.AddScoped<FormsApplicationService>();
         return services;
     }
+}
+
+internal sealed class NoOpEmployeePrefillProvider : IEmployeePrefillProvider
+{
+    public Task<IReadOnlyDictionary<string, string?>> GetEmployeeDataAsync(UserProfile requester, string employeeEmail, CancellationToken cancellationToken = default) =>
+        Task.FromResult<IReadOnlyDictionary<string, string?>>(new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase));
 }
 
 internal sealed class NoOpAntiAbuseGuard : IAntiAbuseGuard

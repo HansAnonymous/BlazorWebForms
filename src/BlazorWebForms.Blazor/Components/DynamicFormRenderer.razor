@@ -1,6 +1,7 @@
 @using BlazorWebForms.Core.Abstractions
 @using BlazorWebForms.Core.Models
 @using System.Globalization
+@using System.Text.Json
 @inject FormsApplicationService FormsService
 @inject IConditionEvaluator ConditionEvaluator
 
@@ -47,7 +48,7 @@
                                        aria-invalid="@HasFieldError(field.Id)"
                                        aria-required="@field.Required"
                                        aria-describedby="@GetAriaDescribedBy(field)"
-                                       disabled="@ReadOnly"
+                                       disabled="@IsFieldReadOnly(field)"
                                        @oninput="e => UpdateValue(field.Id, e.Value?.ToString())" />
                                 break;
                             case FormFieldKind.TextArea:
@@ -59,7 +60,7 @@
                                           aria-invalid="@HasFieldError(field.Id)"
                                           aria-required="@field.Required"
                                           aria-describedby="@GetAriaDescribedBy(field)"
-                                          disabled="@ReadOnly"
+                                          disabled="@IsFieldReadOnly(field)"
                                           @oninput="e => UpdateValue(field.Id, e.Value?.ToString())">@GetValue(field.Id)</textarea>
                                 break;
                             case FormFieldKind.Checkbox:
@@ -67,13 +68,13 @@
                                        type="checkbox"
                                        checked="@string.Equals(GetValue(field.Id), "true", StringComparison.OrdinalIgnoreCase)"
                                        aria-describedby="@GetAriaDescribedBy(field)"
-                                       disabled="@ReadOnly"
+                                       disabled="@IsFieldReadOnly(field)"
                                        @onchange="e => UpdateValue(field.Id, e.Value?.ToString())" />
                                 break;
                             case FormFieldKind.Select:
                                 <select id="@field.Id"
                                         class="bwf-input"
-                                        disabled="@ReadOnly"
+                                        disabled="@IsFieldReadOnly(field)"
                                         value="@GetValue(field.Id)"
                                         aria-invalid="@HasFieldError(field.Id)"
                                         aria-required="@field.Required"
@@ -95,7 +96,7 @@
                                                    name="@field.Id"
                                                    value="@option.Value"
                                                    checked="@string.Equals(GetValue(field.Id), option.Value, StringComparison.OrdinalIgnoreCase)"
-                                                   disabled="@ReadOnly"
+                                                   disabled="@IsFieldReadOnly(field)"
                                                    @onchange="e => UpdateValue(field.Id, e.Value?.ToString())" />
                                             <span>@GetOptionLabel(option)</span>
                                         </label>
@@ -103,7 +104,7 @@
                                 </div>
                                 break;
                             case FormFieldKind.File:
-                                <InputFile OnChange="e => OnFileChanged(field.Id, e)" disabled="@ReadOnly" multiple="@(GetMaxFileCount(field) > 1)" aria-describedby="@GetAriaDescribedBy(field)" aria-invalid="@HasFieldError(field.Id)" />
+                                <InputFile OnChange="e => OnFileChanged(field.Id, e)" disabled="@IsFieldReadOnly(field)" multiple="@(GetMaxFileCount(field) > 1)" aria-describedby="@GetAriaDescribedBy(field)" aria-invalid="@HasFieldError(field.Id)" />
                                 @if (TryGetFileConstraints(field, out var constraints))
                                 {
                                     <div class="bwf-help" id="@GetConstraintId(field.Id)">@constraints</div>
@@ -126,16 +127,57 @@
                                 }
                                 break;
                             case FormFieldKind.Signature:
-                                <input id="@field.Id"
-                                       class="bwf-input"
-                                       type="text"
-                                       value="@GetValue(field.Id)"
-                                       placeholder="Type signer name"
-                                       aria-invalid="@HasFieldError(field.Id)"
-                                       aria-required="@field.Required"
-                                       aria-describedby="@GetAriaDescribedBy(field)"
-                                       disabled="@ReadOnly"
-                                       @oninput="e => UpdateValue(field.Id, e.Value?.ToString())" />
+                                var signature = GetSignatureValue(field.Id);
+                                <div class="bwf-signature" role="group" aria-labelledby="@GetLabelId(field.Id)" aria-describedby="@GetAriaDescribedBy(field)">
+                                    <input id="@field.Id"
+                                           class="bwf-input"
+                                           type="text"
+                                           value="@signature.SignerName"
+                                           placeholder="Type signer name"
+                                           aria-invalid="@HasFieldError(field.Id)"
+                                           aria-required="@field.Required"
+                                           disabled="@IsFieldReadOnly(field)"
+                                           @oninput="e => UpdateSignatureName(field.Id, e.Value?.ToString())" />
+                                    <label class="bwf-checkbox">
+                                        <input type="checkbox"
+                                               checked="@signature.Confirmed"
+                                               disabled="@IsFieldReadOnly(field)"
+                                               @onchange="e => UpdateSignatureConfirmation(field.Id, e.Value is bool confirmed && confirmed)" />
+                                        <span>I confirm this is my in-app signature.</span>
+                                    </label>
+                                    @if (signature.SignedUtc is not null)
+                                    {
+                                        <div class="bwf-help">Signed @signature.SignedUtc.Value.ToString("u", CultureInfo.CurrentCulture)</div>
+                                    }
+                                </div>
+                                break;
+                            case FormFieldKind.RepeatableList:
+                                var repeatableItems = GetRepeatableItems(field);
+                                <div class="bwf-repeatable" role="group" aria-labelledby="@GetLabelId(field.Id)" aria-describedby="@GetAriaDescribedBy(field)">
+                                    @for (var itemIndex = 0; itemIndex < repeatableItems.Count; itemIndex++)
+                                    {
+                                        var currentIndex = itemIndex;
+                                        <div class="bwf-repeatable-item">
+                                            <input id="@GetRepeatableItemId(field.Id, currentIndex)"
+                                                   class="bwf-input"
+                                                   type="text"
+                                                   value="@repeatableItems[currentIndex]"
+                                                   placeholder="@GetRepeatableItemPlaceholder(field, currentIndex)"
+                                                   aria-invalid="@HasFieldError(field.Id)"
+                                                   aria-required="@field.Required"
+                                                   disabled="@IsFieldReadOnly(field)"
+                                                   @oninput="e => UpdateRepeatableItem(field, currentIndex, e.Value?.ToString())" />
+                                            @if (!IsFieldReadOnly(field) && CanRemoveRepeatableItem(field, repeatableItems.Count))
+                                            {
+                                                <button type="button" class="bwf-button" @onclick="() => RemoveRepeatableItem(field, currentIndex)">Remove</button>
+                                            }
+                                        </div>
+                                    }
+                                    @if (!IsFieldReadOnly(field) && CanAddRepeatableItem(field, repeatableItems.Count))
+                                    {
+                                        <button type="button" class="bwf-button" @onclick="() => AddRepeatableItem(field)">@(string.IsNullOrWhiteSpace(field.RepeatableAddButtonText) ? "Add item" : field.RepeatableAddButtonText)</button>
+                                    }
+                                </div>
                                 break;
                         }
 
@@ -169,9 +211,12 @@
     private ElementReference uploadErrorSummaryRef;
     private bool focusUploadErrorSummary;
     private const long DefaultMaxUploadBytes = 10 * 1024 * 1024;
+    private static readonly JsonSerializerOptions FieldValueJsonOptions = new(JsonSerializerDefaults.Web);
 
     private string? GetValue(string fieldId) =>
         Answers.TryGetValue(fieldId, out var value) ? value : null;
+
+    private bool IsFieldReadOnly(FormFieldDefinition field) => ReadOnly || field.ReadOnly;
 
     private static string GetInputType(FormFieldKind kind) => kind switch
     {
@@ -183,6 +228,138 @@
     private async Task UpdateValue(string fieldId, string? value)
     {
         Answers[fieldId] = value;
+        await AnswersChanged.InvokeAsync(Answers);
+    }
+
+    private List<string> GetRepeatableItems(FormFieldDefinition field)
+    {
+        var raw = GetValue(field.Id);
+        List<string> items = [];
+        if (!string.IsNullOrWhiteSpace(raw))
+        {
+            try
+            {
+                items = JsonSerializer.Deserialize<List<string>>(raw, FieldValueJsonOptions) ?? [];
+            }
+            catch (JsonException)
+            {
+                items = [raw];
+            }
+        }
+
+        var minItems = Math.Max(field.Required ? 1 : 0, field.MinItems ?? 0);
+        while (items.Count < minItems)
+        {
+            items.Add(string.Empty);
+        }
+
+        if (items.Count == 0 && !IsFieldReadOnly(field))
+        {
+            items.Add(string.Empty);
+        }
+
+        return items;
+    }
+
+    private async Task UpdateRepeatableItem(FormFieldDefinition field, int index, string? value)
+    {
+        var items = GetRepeatableItems(field);
+        if (index < 0 || index >= items.Count)
+        {
+            return;
+        }
+
+        items[index] = value ?? string.Empty;
+        await UpdateRepeatableItems(field.Id, items);
+    }
+
+    private async Task AddRepeatableItem(FormFieldDefinition field)
+    {
+        var items = GetRepeatableItems(field);
+        if (!CanAddRepeatableItem(field, items.Count))
+        {
+            return;
+        }
+
+        items.Add(string.Empty);
+        await UpdateRepeatableItems(field.Id, items);
+    }
+
+    private async Task RemoveRepeatableItem(FormFieldDefinition field, int index)
+    {
+        var items = GetRepeatableItems(field);
+        if (index < 0 || index >= items.Count || !CanRemoveRepeatableItem(field, items.Count))
+        {
+            return;
+        }
+
+        items.RemoveAt(index);
+        await UpdateRepeatableItems(field.Id, items);
+    }
+
+    private async Task UpdateRepeatableItems(string fieldId, List<string> items)
+    {
+        Answers[fieldId] = JsonSerializer.Serialize(items, FieldValueJsonOptions);
+        await AnswersChanged.InvokeAsync(Answers);
+    }
+
+    private static bool CanAddRepeatableItem(FormFieldDefinition field, int count) =>
+        !field.MaxItems.HasValue || count < field.MaxItems.Value;
+
+    private static bool CanRemoveRepeatableItem(FormFieldDefinition field, int count)
+    {
+        var minItems = Math.Max(field.Required ? 1 : 0, field.MinItems ?? 0);
+        return count > minItems;
+    }
+
+    private static string GetRepeatableItemId(string fieldId, int index) => $"{fieldId}-{index}";
+
+    private static string GetRepeatableItemPlaceholder(FormFieldDefinition field, int index)
+    {
+        var label = string.IsNullOrWhiteSpace(field.RepeatableItemLabel) ? "Item" : field.RepeatableItemLabel;
+        return $"{label} {index + 1}";
+    }
+
+    private SignatureFieldValue GetSignatureValue(string fieldId)
+    {
+        var raw = GetValue(fieldId);
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return new SignatureFieldValue();
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<SignatureFieldValue>(raw, FieldValueJsonOptions) ?? new SignatureFieldValue();
+        }
+        catch (JsonException)
+        {
+            return new SignatureFieldValue
+            {
+                SignerName = raw,
+                Confirmed = true
+            };
+        }
+    }
+
+    private async Task UpdateSignatureName(string fieldId, string? signerName)
+    {
+        var signature = GetSignatureValue(fieldId);
+        signature.SignerName = signerName ?? string.Empty;
+        await UpdateSignatureValue(fieldId, signature);
+    }
+
+    private async Task UpdateSignatureConfirmation(string fieldId, bool confirmed)
+    {
+        var signature = GetSignatureValue(fieldId);
+        signature.Confirmed = confirmed;
+        signature.SignedUtc = confirmed ? DateTimeOffset.UtcNow : null;
+        await UpdateSignatureValue(fieldId, signature);
+    }
+
+    private async Task UpdateSignatureValue(string fieldId, SignatureFieldValue signature)
+    {
+        Answers[fieldId] = JsonSerializer.Serialize(signature, FieldValueJsonOptions);
         await AnswersChanged.InvokeAsync(Answers);
     }
 
