@@ -203,9 +203,11 @@ var localizedSnapshot = serializer.Deserialize(localizedVersion.DefinitionJson);
 Assert(localizedSnapshot.LocalizedTitles.TryGetValue("fr-FR", out var snapshotTitle) && snapshotTitle == "Demande de voyage", "Published snapshot preserves form localized title.");
 Assert(localizedSnapshot.Sections[0].Fields[0].LocalizedPlaceholders.TryGetValue("fr", out var snapshotPlaceholder) && snapshotPlaceholder == "Entrez le nom", "Published snapshot preserves localized field placeholder.");
 
+// Test: Invalid default culture is rejected
 var invalidCultureDefinition = DemoFormFactory.CreateDefaultDefinition();
 invalidCultureDefinition.DefaultCulture = "invalid-culture";
-var invalidCultureBlocked = false;
+var invalidDefaultCultureBlocked = false;
+string? invalidCultureError = null;
 try
 {
     await app.SaveDraftAsync(new SaveDraftRequest
@@ -217,11 +219,36 @@ try
         Definition = invalidCultureDefinition
     });
 }
-catch (InvalidOperationException)
+catch (InvalidOperationException ex)
 {
-    invalidCultureBlocked = true;
+    invalidDefaultCultureBlocked = true;
+    invalidCultureError = ex.Message;
 }
-Assert(invalidCultureBlocked, "Save draft blocks invalid default culture.");
+Assert(invalidDefaultCultureBlocked, "Save draft blocks invalid default culture.");
+Assert(invalidCultureError?.Contains("not a valid culture") == true, $"Invalid culture error message is descriptive: {invalidCultureError}");
+
+// Test: Invalid culture in localized titles is also rejected
+var invalidLocalizedCulture = DemoFormFactory.CreateDefaultDefinition();
+invalidLocalizedCulture.LocalizedTitles["xyz-XYZ"] = "Invalid culture form title";
+var invalidLocalizedBlocked = false;
+try
+{
+    await app.SaveDraftAsync(new SaveDraftRequest
+    {
+        Name = "Invalid localized culture form",
+        Description = "Should fail save",
+        Slug = "invalid-localized-culture-form",
+        AccessMode = FormAccessMode.Public,
+        Definition = invalidLocalizedCulture
+    });
+}
+catch (InvalidOperationException ex)
+{
+    invalidLocalizedBlocked = true;
+    invalidCultureError = ex.Message;
+}
+Assert(invalidLocalizedBlocked, "Save draft blocks invalid culture in localized titles.");
+Assert(invalidCultureError?.Contains("not a valid culture") == true, $"Invalid localized culture error is descriptive: {invalidCultureError}");
 
 var brandingDefinition = DemoFormFactory.CreateDefaultDefinition();
 brandingDefinition.Branding.LogoUrl = "https://cdn.example.com/logo.png";
