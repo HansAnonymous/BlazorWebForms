@@ -750,16 +750,6 @@ var fallback = FormLocalizationResolver.ResolveText(
     "en-US");
 Assert(fallback == "base-text", "Localization fallback returns base text when translation is unavailable.");
 
-var repoRootForChecks = FindRepoRoot();
-AssertFileContains(
-    Path.Combine(repoRootForChecks, "src", "BlazorWebForms.SampleApp", "wwwroot", "app.css"),
-    "@media (max-width: 900px)",
-    "Responsive baseline checks include mobile media query.");
-AssertFileContains(
-    Path.Combine(repoRootForChecks, "src", "BlazorWebForms.Blazor", "Components", "DynamicFormRenderer.razor"),
-    "role=\"form\"",
-    "Accessibility baseline checks include semantic form role.");
-
 var detail = await app.GetEntryDetailAsync(entry.Id);
 Assert(detail is not null && detail.CanView, "Authorized user can view entry detail.");
 
@@ -1083,37 +1073,6 @@ static FormDefinition BuildLargeDefinition(int sectionCount, int fieldsPerSectio
     }
 
     return definition;
-}
-
-static string FindRepoRoot()
-{
-    var current = new DirectoryInfo(AppContext.BaseDirectory);
-    while (current is not null)
-    {
-        var roadmapPath = Path.Combine(current.FullName, "ROADMAP.md");
-        if (File.Exists(roadmapPath))
-        {
-            return current.FullName;
-        }
-
-        current = current.Parent;
-    }
-
-    throw new InvalidOperationException("Could not locate repository root for tooling checks.");
-}
-
-static void AssertFileContains(string path, string expected, string message)
-{
-    if (!File.Exists(path))
-    {
-        throw new InvalidOperationException($"{message} Missing file: {path}");
-    }
-
-    var content = File.ReadAllText(path);
-    if (!content.Contains(expected, StringComparison.Ordinal))
-    {
-        throw new InvalidOperationException(message);
-    }
 }
 
 internal sealed class FakeRepository : IFormsRepository

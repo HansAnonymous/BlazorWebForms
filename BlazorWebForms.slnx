@@ -12,10 +12,8 @@
     <File Path="ROADMAP.md" />
   </Folder>
   <Folder Name="/src/">
-    <Project Path="src/BlazorWebForms.Blazor/BlazorWebForms.Blazor.csproj" />
     <Project Path="src/BlazorWebForms.Core/BlazorWebForms.Core.csproj" />
     <Project Path="src/BlazorWebForms.Infrastructure.SqlServer/BlazorWebForms.Infrastructure.SqlServer.csproj" />
-    <Project Path="src/BlazorWebForms.SampleApp/BlazorWebForms.SampleApp.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/BlazorWebForms.Core.Tests/BlazorWebForms.Core.Tests.csproj" />

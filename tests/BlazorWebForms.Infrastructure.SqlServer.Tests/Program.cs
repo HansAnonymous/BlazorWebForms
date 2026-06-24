@@ -331,38 +331,6 @@ perfWatch.Stop();
 Assert(perfPage.Count == 50, "Performance paging query returns bounded page size.");
 Assert(perfWatch.ElapsedMilliseconds < 5000, "Performance paging query remains within regression threshold.");
 
-var repoRoot = FindRepoRoot();
-AssertFileContains(
-    Path.Combine(repoRoot, "src", "BlazorWebForms.Blazor", "Components", "DynamicFormRenderer.razor"),
-    "aria-describedby=",
-    "Accessibility check: renderer includes aria described-by wiring.");
-AssertFileContains(
-    Path.Combine(repoRoot, "src", "BlazorWebForms.Blazor", "Components", "DynamicFormRenderer.razor"),
-    "role=\"radiogroup\"",
-    "Accessibility check: renderer includes radio group semantics.");
-AssertFileContains(
-    Path.Combine(repoRoot, "src", "BlazorWebForms.SampleApp", "Components", "Layout", "MainLayout.razor"),
-    "skip-link",
-    "Accessibility check: sample shell includes skip-link navigation.");
-
-AssertFileContains(
-    Path.Combine(repoRoot, "src", "BlazorWebForms.SampleApp", "wwwroot", "app.css"),
-    "@media (max-width: 900px)",
-    "Responsive check: mobile media query exists.");
-AssertFileContains(
-    Path.Combine(repoRoot, "src", "BlazorWebForms.SampleApp", "wwwroot", "app.css"),
-    "flex-direction: column;",
-    "Responsive check: action stacks support narrow breakpoints.");
-
-AssertFileContains(
-    Path.Combine(repoRoot, "src", "BlazorWebForms.SampleApp", "Program.cs"),
-    "UseRequestLocalization",
-    "Localization check: request localization middleware is configured.");
-AssertFileContains(
-    Path.Combine(repoRoot, "src", "BlazorWebForms.SampleApp", "Localization", "AppLocalizer.cs"),
-    "yield return \"en\";",
-    "Localization fallback check: localizer falls back to English.");
-
 // invitation flow smoke
 var invitation = await forms.CreateInvitationAsync(new CreateInvitationRequest
 {
@@ -405,33 +373,3 @@ static async Task AssertThrowsAsync(Func<Task> action, string message)
     throw new InvalidOperationException(message);
 }
 
-static string FindRepoRoot()
-{
-    var current = new DirectoryInfo(AppContext.BaseDirectory);
-    while (current is not null)
-    {
-        var roadmapPath = Path.Combine(current.FullName, "ROADMAP.md");
-        if (File.Exists(roadmapPath))
-        {
-            return current.FullName;
-        }
-
-        current = current.Parent;
-    }
-
-    throw new InvalidOperationException("Could not locate repository root for tooling checks.");
-}
-
-static void AssertFileContains(string path, string expected, string message)
-{
-    if (!File.Exists(path))
-    {
-        throw new InvalidOperationException($"{message} Missing file: {path}");
-    }
-
-    var content = File.ReadAllText(path);
-    if (!content.Contains(expected, StringComparison.Ordinal))
-    {
-        throw new InvalidOperationException(message);
-    }
-}
