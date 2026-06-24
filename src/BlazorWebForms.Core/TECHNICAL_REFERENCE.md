@@ -10,6 +10,7 @@ The Core package includes comprehensive technical documentation:
 - **[CORE_MODELS.md](../../docs/CORE_MODELS.md)** — Domain model reference (FormAggregate, EntryRecord, FormDefinition, etc.)
 - **[CORE_LOCALIZATION.md](../../docs/CORE_LOCALIZATION.md)** — Localization, culture resolution, condition evaluation, and validation
 - **[CORE_EXTENDING.md](../../docs/CORE_EXTENDING.md)** — Implementing required and optional interfaces
+- **[QUESTION_TYPES.md](../../docs/QUESTION_TYPES.md)** — Every `FormFieldKind` explained with properties, validation rules, answer format, and examples
 
 For integration guide and usage patterns: [docs/USING_BlazorWebForms.md](../../docs/USING_BlazorWebForms.md)
 

@@ -1,27 +1,24 @@
 <Solution>
   <Folder Name="/Solution Items/">
     <File Path=".gitignore" />
-    <File Path="milestones/Milestone 1.md" />
-    <File Path="milestones/Milestone 2.md" />
-    <File Path="milestones/Milestone 3.md" />
-    <File Path="milestones/Milestone 4.md" />
-    <File Path="milestones/Milestone 5.md" />
-    <File Path="milestones/Milestone 6.md" />
     <File Path="PREMISE.md" />
     <File Path="README.md" />
-    <File Path="ROADMAP.md" />
   </Folder>
   <Folder Name="/src/">
-    <Project Path="src/BlazorWebForms.Blazor/BlazorWebForms.Blazor.csproj" />
     <Project Path="src/BlazorWebForms.Core/BlazorWebForms.Core.csproj" />
     <Project Path="src/BlazorWebForms.Infrastructure.SqlServer/BlazorWebForms.Infrastructure.SqlServer.csproj" />
-    <Project Path="src/BlazorWebForms.SampleApp/BlazorWebForms.SampleApp.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/BlazorWebForms.Core.Tests/BlazorWebForms.Core.Tests.csproj" />
     <Project Path="tests/BlazorWebForms.Infrastructure.SqlServer.Tests/BlazorWebForms.Infrastructure.SqlServer.Tests.csproj" />
   </Folder>
   <Folder Name="/docs/">
+    <File Path="docs/CORE_API_REFERENCE.md" />
+    <File Path="docs/CORE_EXTENDING.md" />
+    <File Path="docs/CORE_LOCALIZATION.md" />
+    <File Path="docs/CORE_MODELS.md" />
+    <File Path="docs/DEVELOPER_GUIDE.md" />
+    <File Path="docs/QUESTION_TYPES.md" />
     <File Path="docs/USING_BlazorWebForms.md" />
   </Folder>
 </Solution>

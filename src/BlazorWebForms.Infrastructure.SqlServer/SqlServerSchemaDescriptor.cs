@@ -16,7 +16,7 @@ public sealed class SqlServerSchemaDescriptor(BlazorWebFormsSqlServerOptions opt
             [Description] NVARCHAR(2000) NOT NULL,
             [OwnerUserId] UNIQUEIDENTIFIER NOT NULL,
             [CreatedUtc] DATETIMEOFFSET NOT NULL,
-            [UpdatedUtc] DATETIMEOFFSET NOT NULL
+            [UpdatedUtc] DATETIMEOFFSET NOT NULL,
             [DraftDefinitionJson] NVARCHAR(MAX) NULL,
             [PublicationSlug] NVARCHAR(MAX) NOT NULL,
             [PublicationDomain] NVARCHAR(MAX) NOT NULL,
@@ -67,6 +67,7 @@ public sealed class SqlServerSchemaDescriptor(BlazorWebFormsSqlServerOptions opt
             [ApproverEmail] NVARCHAR(MAX) NOT NULL,
             [Status] INT NOT NULL,
             [Signature] NVARCHAR(MAX) NULL,
+            [RejectionReason] NVARCHAR(2000) NULL,
             [CompletedUtc] DATETIMEOFFSET NULL,
             CONSTRAINT [FK_ApprovalSteps_Entries_EntryId] FOREIGN KEY ([EntryId]) REFERENCES [{options.SchemaName}].[Entries]([Id]) ON DELETE CASCADE
         );
@@ -115,6 +116,10 @@ public sealed class SqlServerSchemaDescriptor(BlazorWebFormsSqlServerOptions opt
             [UserId] UNIQUEIDENTIFIER NOT NULL,
             [DisplayName] NVARCHAR(MAX) NOT NULL,
             [Role] INT NOT NULL,
+            [ScopeType] NVARCHAR(32) NOT NULL,
+            [ScopeValue] NVARCHAR(128) NULL,
+            [UpdatedByUserId] UNIQUEIDENTIFIER NOT NULL,
+            [UpdatedUtc] DATETIMEOFFSET NOT NULL,
             CONSTRAINT [FK_FormPermissions_Forms_FormId] FOREIGN KEY ([FormId]) REFERENCES [{options.SchemaName}].[Forms]([Id]) ON DELETE CASCADE
         );
 
@@ -127,28 +132,59 @@ public sealed class SqlServerSchemaDescriptor(BlazorWebFormsSqlServerOptions opt
             CONSTRAINT [FK_FormNotifications_Forms_FormId] FOREIGN KEY ([FormId]) REFERENCES [{options.SchemaName}].[Forms]([Id]) ON DELETE CASCADE
         );
 
+        CREATE TABLE [{options.SchemaName}].[FormInvitations] (
+            [Id] UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+            [FormId] UNIQUEIDENTIFIER NOT NULL,
+            [Email] NVARCHAR(256) NOT NULL,
+            [Role] INT NOT NULL,
+            [ScopeType] NVARCHAR(32) NOT NULL,
+            [ScopeValue] NVARCHAR(128) NULL,
+            [Token] NVARCHAR(128) NOT NULL,
+            [ExpiresUtc] DATETIMEOFFSET NOT NULL,
+            [Status] INT NOT NULL,
+            [CreatedByUserId] UNIQUEIDENTIFIER NOT NULL,
+            [CreatedUtc] DATETIMEOFFSET NOT NULL,
+            [UpdatedByUserId] UNIQUEIDENTIFIER NULL,
+            [UpdatedUtc] DATETIMEOFFSET NULL,
+            CONSTRAINT [FK_FormInvitations_Forms_FormId] FOREIGN KEY ([FormId]) REFERENCES [{options.SchemaName}].[Forms]([Id]) ON DELETE CASCADE
+        );
+
         CREATE UNIQUE INDEX [IX_Forms_Key] ON [{options.SchemaName}].[Forms] ([Key]);
         CREATE UNIQUE INDEX [IX_Forms_PublicationSlug] ON [{options.SchemaName}].[Forms] ([PublicationSlug]);
         CREATE INDEX [IX_Forms_UpdatedUtc] ON [{options.SchemaName}].[Forms] ([UpdatedUtc]);
+
         CREATE UNIQUE INDEX [IX_FormVersions_FormId_VersionNumber] ON [{options.SchemaName}].[FormVersions] ([FormId], [VersionNumber]);
+
         CREATE INDEX [IX_Entries_FormId] ON [{options.SchemaName}].[Entries] ([FormId]);
         CREATE INDEX [IX_Entries_FormId_SubmittedUtc] ON [{options.SchemaName}].[Entries] ([FormId], [SubmittedUtc]);
         CREATE INDEX [IX_Entries_FormId_Status_SubmittedUtc] ON [{options.SchemaName}].[Entries] ([FormId], [Status], [SubmittedUtc]);
+        CREATE INDEX [IX_Entries_FormId_Status_SubmittedByEmail_SubmittedUtc] ON [{options.SchemaName}].[Entries] ([FormId], [Status], [SubmittedByEmail], [SubmittedUtc]);
         CREATE INDEX [IX_Entries_Status] ON [{options.SchemaName}].[Entries] ([Status]);
         CREATE INDEX [IX_Entries_SubmittedUtc] ON [{options.SchemaName}].[Entries] ([SubmittedUtc]);
+
         CREATE UNIQUE INDEX [IX_EntryRevisions_EntryId_RevisionNumber] ON [{options.SchemaName}].[EntryRevisions] ([EntryId], [RevisionNumber]);
+
         CREATE UNIQUE INDEX [IX_ApprovalSteps_EntryId_Order] ON [{options.SchemaName}].[ApprovalSteps] ([EntryId], [Order]);
         CREATE INDEX [IX_ApprovalSteps_Status] ON [{options.SchemaName}].[ApprovalSteps] ([Status]);
+
         CREATE INDEX [IX_ApprovalAuditEvents_EntryId_OccurredUtc] ON [{options.SchemaName}].[ApprovalAuditEvents] ([EntryId], [OccurredUtc]);
         CREATE INDEX [IX_ApprovalAuditEvents_EntryId_Action] ON [{options.SchemaName}].[ApprovalAuditEvents] ([EntryId], [Action]);
         CREATE INDEX [IX_ApprovalAuditEvents_CorrelationId] ON [{options.SchemaName}].[ApprovalAuditEvents] ([CorrelationId]);
+
         CREATE INDEX [IX_EntryFiles_EntryId] ON [{options.SchemaName}].[EntryFiles] ([EntryId]);
         CREATE INDEX [IX_EntryFiles_EntryId_FieldId] ON [{options.SchemaName}].[EntryFiles] ([EntryId], [FieldId]);
         CREATE UNIQUE INDEX [IX_EntryFiles_RelativePath] ON [{options.SchemaName}].[EntryFiles] ([RelativePath]);
+
         CREATE INDEX [IX_EntrySearchIndex_EntryId] ON [{options.SchemaName}].[EntrySearchIndex] ([EntryId]);
         CREATE INDEX [IX_EntrySearchIndex_EntryId_Key] ON [{options.SchemaName}].[EntrySearchIndex] ([EntryId], [Key]);
         CREATE INDEX [IX_EntrySearchIndex_Key_Value] ON [{options.SchemaName}].[EntrySearchIndex] ([Key], [Value]);
+
         CREATE UNIQUE INDEX [IX_FormPermissions_FormId_UserId] ON [{options.SchemaName}].[FormPermissions] ([FormId], [UserId]);
+        CREATE INDEX [IX_FormPermissions_FormId_ScopeType_ScopeValue] ON [{options.SchemaName}].[FormPermissions] ([FormId], [ScopeType], [ScopeValue]);
+
         CREATE UNIQUE INDEX [IX_FormNotifications_FormId_Email] ON [{options.SchemaName}].[FormNotifications] ([FormId], [Email]);
+
+        CREATE UNIQUE INDEX [IX_FormInvitations_Token] ON [{options.SchemaName}].[FormInvitations] ([Token]);
+        CREATE INDEX [IX_FormInvitations_FormId_Email_Status] ON [{options.SchemaName}].[FormInvitations] ([FormId], [Email], [Status]);
         """;
 }

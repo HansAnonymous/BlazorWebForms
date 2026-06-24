@@ -1152,6 +1152,81 @@ public sealed class FormsApplicationService(
                     {
                         throw new InvalidOperationException($"Field '{field.Label}' minimum item count cannot exceed maximum item count.");
                     }
+
+                    if (field.RepeatableColumns.Count > 0)
+                    {
+                        var columnIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                        foreach (var column in field.RepeatableColumns)
+                        {
+                            if (string.IsNullOrWhiteSpace(column.Id))
+                            {
+                                throw new InvalidOperationException($"Field '{field.Label}' contains a repeatable column with an empty id.");
+                            }
+
+                            if (!columnIds.Add(column.Id))
+                            {
+                                throw new InvalidOperationException($"Field '{field.Label}' contains duplicate repeatable column id '{column.Id}'.");
+                            }
+
+                            if (string.IsNullOrWhiteSpace(column.Label))
+                            {
+                                throw new InvalidOperationException($"Field '{field.Label}' column '{column.Id}' must have a label.");
+                            }
+                        }
+                    }
+                }
+
+                if (field.Kind == FormFieldKind.RankedChoice)
+                {
+                    if (field.Options.Count < 2)
+                    {
+                        throw new InvalidOperationException($"Field '{field.Label}' must define at least two options for ranked choice.");
+                    }
+
+                    var rankedOptionValues = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var option in field.Options)
+                    {
+                        if (string.IsNullOrWhiteSpace(option.Value))
+                        {
+                            throw new InvalidOperationException($"Field '{field.Label}' includes a ranked choice option with an empty value.");
+                        }
+
+                        if (!rankedOptionValues.Add(option.Value))
+                        {
+                            throw new InvalidOperationException($"Field '{field.Label}' contains duplicate ranked choice option values.");
+                        }
+                    }
+
+                    if (field.RankCount.HasValue)
+                    {
+                        if (field.RankCount.Value < 1)
+                        {
+                            throw new InvalidOperationException($"Field '{field.Label}' rank count must be at least one.");
+                        }
+
+                        if (field.RankCount.Value > field.Options.Count)
+                        {
+                            throw new InvalidOperationException($"Field '{field.Label}' rank count cannot exceed the number of options.");
+                        }
+                    }
+                }
+
+                if (field.Kind == FormFieldKind.Number)
+                {
+                    if (field.NumberDisplayKind == NumberDisplayKind.Unit && string.IsNullOrWhiteSpace(field.NumberUnit))
+                    {
+                        throw new InvalidOperationException($"Field '{field.Label}' number unit label is required when display kind is Unit.");
+                    }
+
+                    if (field.MinValue.HasValue && field.MaxValue.HasValue && field.MinValue.Value > field.MaxValue.Value)
+                    {
+                        throw new InvalidOperationException($"Field '{field.Label}' minimum value cannot exceed maximum value.");
+                    }
+
+                    if (field.NumberStep.HasValue && field.NumberStep.Value <= 0)
+                    {
+                        throw new InvalidOperationException($"Field '{field.Label}' number step must be greater than zero.");
+                    }
                 }
 
                 if ((field.Prefill.Source is PrefillSourceKind.Claim or PrefillSourceKind.Employee) && string.IsNullOrWhiteSpace(field.Prefill.Key))
@@ -1245,6 +1320,12 @@ public sealed class FormsApplicationService(
                 foreach (var option in field.Options)
                 {
                     ValidateLocalizationMap(option.LocalizedLabels, $"Field '{field.Label}' option '{option.Value}' localized labels");
+                }
+
+                foreach (var column in field.RepeatableColumns)
+                {
+                    ValidateLocalizationMap(column.LocalizedLabels, $"Field '{field.Label}' column '{column.Id}' localized labels");
+                    ValidateLocalizationMap(column.LocalizedPlaceholders, $"Field '{field.Label}' column '{column.Id}' localized placeholders");
                 }
             }
         }

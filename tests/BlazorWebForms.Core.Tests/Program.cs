@@ -750,16 +750,6 @@ var fallback = FormLocalizationResolver.ResolveText(
     "en-US");
 Assert(fallback == "base-text", "Localization fallback returns base text when translation is unavailable.");
 
-var repoRootForChecks = FindRepoRoot();
-AssertFileContains(
-    Path.Combine(repoRootForChecks, "src", "BlazorWebForms.SampleApp", "wwwroot", "app.css"),
-    "@media (max-width: 900px)",
-    "Responsive baseline checks include mobile media query.");
-AssertFileContains(
-    Path.Combine(repoRootForChecks, "src", "BlazorWebForms.Blazor", "Components", "DynamicFormRenderer.razor"),
-    "role=\"form\"",
-    "Accessibility baseline checks include semantic form role.");
-
 var detail = await app.GetEntryDetailAsync(entry.Id);
 Assert(detail is not null && detail.CanView, "Authorized user can view entry detail.");
 
@@ -1040,6 +1030,265 @@ catch (InvalidOperationException)
 }
 Assert(expiredCaught, "Expired invitation cannot be accepted.");
 
+// ── RankedChoice round-trip ───────────────────────────────────────────────────
+
+var rankedForm = await app.SaveDraftAsync(new SaveDraftRequest
+{
+    Name = "Ranked choice form",
+    Description = "Test ranked choice field",
+    Slug = $"ranked-{Guid.NewGuid():N}",
+    AccessMode = FormAccessMode.Public,
+    Definition = new FormDefinition
+    {
+        Title = "Ranked choice form",
+        Sections =
+        [
+            new FormSectionDefinition
+            {
+                Id = "s1",
+                Title = "Preferences",
+                Fields =
+                [
+                    new FormFieldDefinition
+                    {
+                        Id = "topPicks",
+                        Kind = FormFieldKind.RankedChoice,
+                        Label = "Top 3 picks",
+                        Required = true,
+                        RankCount = 3,
+                        Options =
+                        [
+                            new FormFieldOption { Value = "red", Label = "Red" },
+                            new FormFieldOption { Value = "blue", Label = "Blue" },
+                            new FormFieldOption { Value = "green", Label = "Green" },
+                            new FormFieldOption { Value = "yellow", Label = "Yellow" },
+                            new FormFieldOption { Value = "purple", Label = "Purple" }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+});
+
+var rankedVersion = await app.PublishAsync(rankedForm.Id);
+Assert(rankedVersion.VersionNumber == 1, "RankedChoice form publishes successfully.");
+
+var rankedAnswerJson = """["blue","green","red"]""";
+var rankedEntry = await app.SubmitEntryAsync(rankedForm.Id, new SubmitEntryRequest
+{
+    Answers = new Dictionary<string, string?> { ["topPicks"] = rankedAnswerJson }
+});
+Assert(rankedEntry.Answers["topPicks"] == rankedAnswerJson, "RankedChoice answer round-trips through submit.");
+
+var rankedDetail = await app.GetEntryDetailAsync(rankedEntry.Id);
+Assert(rankedDetail is not null && rankedDetail.Entry.Answers["topPicks"] == rankedAnswerJson,
+    "RankedChoice answer persists in entry detail.");
+
+var rankedDefinitionJson = serializer.Serialize(rankedForm.DraftDefinition);
+var rankedRoundTrip = serializer.Deserialize(rankedDefinitionJson);
+var rankedField = rankedRoundTrip.Sections[0].Fields[0];
+Assert(rankedField.Kind == FormFieldKind.RankedChoice, "RankedChoice kind round-trips through serializer.");
+Assert(rankedField.RankCount == 3, "RankCount value round-trips through serializer.");
+Assert(rankedField.Options.Count == 5, "RankedChoice options round-trip through serializer.");
+
+// ── RepeatableList multi-attribute columns round-trip ─────────────────────────
+
+var multiAttrForm = await app.SaveDraftAsync(new SaveDraftRequest
+{
+    Name = "Multi-attribute repeatable form",
+    Description = "Test repeatable list with columns",
+    Slug = $"multi-attr-{Guid.NewGuid():N}",
+    AccessMode = FormAccessMode.Public,
+    Definition = new FormDefinition
+    {
+        Title = "Multi-attribute repeatable form",
+        Sections =
+        [
+            new FormSectionDefinition
+            {
+                Id = "s1",
+                Title = "Team members",
+                Fields =
+                [
+                    new FormFieldDefinition
+                    {
+                        Id = "teamMembers",
+                        Kind = FormFieldKind.RepeatableList,
+                        Label = "Team members",
+                        RepeatableItemLabel = "Member",
+                        RepeatableAddButtonText = "Add member",
+                        MinItems = 1,
+                        MaxItems = 10,
+                        RepeatableColumns =
+                        [
+                            new RepeatableListColumnDefinition
+                            {
+                                Id = "memberName",
+                                Label = "Name",
+                                Kind = RepeatableColumnKind.Text,
+                                Required = true,
+                                Placeholder = "Full name"
+                            },
+                            new RepeatableListColumnDefinition
+                            {
+                                Id = "memberRole",
+                                Label = "Role",
+                                Kind = RepeatableColumnKind.Text,
+                                Placeholder = "Job title"
+                            },
+                            new RepeatableListColumnDefinition
+                            {
+                                Id = "memberHours",
+                                Label = "Hours per week",
+                                Kind = RepeatableColumnKind.Number
+                            }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+});
+
+var multiAttrVersion = await app.PublishAsync(multiAttrForm.Id);
+Assert(multiAttrVersion.VersionNumber == 1, "Multi-attribute RepeatableList form publishes successfully.");
+
+var multiAttrAnswerJson = """[{"memberName":"Alice","memberRole":"Engineer","memberHours":"40"},{"memberName":"Bob","memberRole":"Designer","memberHours":"32"}]""";
+var multiAttrEntry = await app.SubmitEntryAsync(multiAttrForm.Id, new SubmitEntryRequest
+{
+    Answers = new Dictionary<string, string?> { ["teamMembers"] = multiAttrAnswerJson }
+});
+Assert(multiAttrEntry.Answers["teamMembers"] == multiAttrAnswerJson,
+    "Multi-attribute RepeatableList answer round-trips through submit.");
+
+var multiAttrDefinitionJson = serializer.Serialize(multiAttrForm.DraftDefinition);
+var multiAttrRoundTrip = serializer.Deserialize(multiAttrDefinitionJson);
+var multiAttrField = multiAttrRoundTrip.Sections[0].Fields[0];
+Assert(multiAttrField.Kind == FormFieldKind.RepeatableList, "RepeatableList kind round-trips through serializer.");
+Assert(multiAttrField.RepeatableColumns.Count == 3, "RepeatableColumns round-trip through serializer.");
+Assert(multiAttrField.RepeatableColumns[0].Id == "memberName", "RepeatableColumn id round-trips.");
+Assert(multiAttrField.RepeatableColumns[0].Label == "Name", "RepeatableColumn label round-trips.");
+Assert(multiAttrField.RepeatableColumns[0].Kind == RepeatableColumnKind.Text, "RepeatableColumn kind round-trips.");
+Assert(multiAttrField.RepeatableColumns[0].Required, "RepeatableColumn required flag round-trips.");
+Assert(multiAttrField.RepeatableColumns[2].Kind == RepeatableColumnKind.Number, "RepeatableColumn Number kind round-trips.");
+
+// backward-compatible: RepeatableList with no columns still works
+var simpleRepeatableForm = await app.SaveDraftAsync(new SaveDraftRequest
+{
+    Name = "Simple repeatable form",
+    Slug = $"simple-rep-{Guid.NewGuid():N}",
+    AccessMode = FormAccessMode.Public,
+    Definition = new FormDefinition
+    {
+        Title = "Simple repeatable form",
+        Sections =
+        [
+            new FormSectionDefinition
+            {
+                Id = "s1",
+                Title = "Items",
+                Fields =
+                [
+                    new FormFieldDefinition
+                    {
+                        Id = "items",
+                        Kind = FormFieldKind.RepeatableList,
+                        Label = "Items",
+                        MaxItems = 5
+                    }
+                ]
+            }
+        ]
+    }
+});
+await app.PublishAsync(simpleRepeatableForm.Id);
+Assert(simpleRepeatableForm.DraftDefinition.Sections[0].Fields[0].RepeatableColumns.Count == 0,
+    "RepeatableList without columns is backward-compatible.");
+
+// ── Number field options round-trip ───────────────────────────────────────────
+
+var numberForm = await app.SaveDraftAsync(new SaveDraftRequest
+{
+    Name = "Number options form",
+    Description = "Test number field options",
+    Slug = $"number-opts-{Guid.NewGuid():N}",
+    AccessMode = FormAccessMode.Public,
+    Definition = new FormDefinition
+    {
+        Title = "Number options form",
+        Sections =
+        [
+            new FormSectionDefinition
+            {
+                Id = "s1",
+                Title = "Measurements",
+                Fields =
+                [
+                    new FormFieldDefinition
+                    {
+                        Id = "distanceKm",
+                        Kind = FormFieldKind.Number,
+                        Label = "Distance",
+                        NumberDisplayKind = NumberDisplayKind.Unit,
+                        NumberUnit = "km",
+                        MinValue = 0m,
+                        MaxValue = 10000m,
+                        NumberStep = 0.1m
+                    },
+                    new FormFieldDefinition
+                    {
+                        Id = "completion",
+                        Kind = FormFieldKind.Number,
+                        Label = "Completion",
+                        NumberDisplayKind = NumberDisplayKind.Percentage,
+                        MinValue = 0m,
+                        MaxValue = 100m,
+                        NumberStep = 1m
+                    },
+                    new FormFieldDefinition
+                    {
+                        Id = "count",
+                        Kind = FormFieldKind.Number,
+                        Label = "Count"
+                    }
+                ]
+            }
+        ]
+    }
+});
+
+var numberVersion = await app.PublishAsync(numberForm.Id);
+Assert(numberVersion.VersionNumber == 1, "Number options form publishes successfully.");
+
+var numberEntry = await app.SubmitEntryAsync(numberForm.Id, new SubmitEntryRequest
+{
+    Answers = new Dictionary<string, string?>
+    {
+        ["distanceKm"] = "42.5",
+        ["completion"] = "75",
+        ["count"] = "3"
+    }
+});
+Assert(numberEntry.Answers["distanceKm"] == "42.5", "Number unit field answer round-trips.");
+Assert(numberEntry.Answers["completion"] == "75", "Number percentage field answer round-trips.");
+
+var numberDefinitionJson = serializer.Serialize(numberForm.DraftDefinition);
+var numberRoundTrip = serializer.Deserialize(numberDefinitionJson);
+var distanceField = numberRoundTrip.Sections[0].Fields[0];
+var completionField = numberRoundTrip.Sections[0].Fields[1];
+var countField = numberRoundTrip.Sections[0].Fields[2];
+
+Assert(distanceField.NumberDisplayKind == NumberDisplayKind.Unit, "NumberDisplayKind.Unit round-trips through serializer.");
+Assert(distanceField.NumberUnit == "km", "NumberUnit round-trips through serializer.");
+Assert(distanceField.MinValue == 0m, "Number MinValue round-trips through serializer.");
+Assert(distanceField.MaxValue == 10000m, "Number MaxValue round-trips through serializer.");
+Assert(distanceField.NumberStep == 0.1m, "Number NumberStep round-trips through serializer.");
+Assert(completionField.NumberDisplayKind == NumberDisplayKind.Percentage, "NumberDisplayKind.Percentage round-trips through serializer.");
+Assert(countField.NumberDisplayKind == NumberDisplayKind.Plain, "Default NumberDisplayKind.Plain round-trips through serializer.");
+Assert(countField.MinValue is null, "Null MinValue round-trips through serializer.");
+Assert(countField.NumberUnit == string.Empty, "Empty NumberUnit round-trips through serializer.");
+
 Console.WriteLine("Core tests passed.");
 
 static void Assert(bool condition, string message)
@@ -1083,37 +1332,6 @@ static FormDefinition BuildLargeDefinition(int sectionCount, int fieldsPerSectio
     }
 
     return definition;
-}
-
-static string FindRepoRoot()
-{
-    var current = new DirectoryInfo(AppContext.BaseDirectory);
-    while (current is not null)
-    {
-        var roadmapPath = Path.Combine(current.FullName, "ROADMAP.md");
-        if (File.Exists(roadmapPath))
-        {
-            return current.FullName;
-        }
-
-        current = current.Parent;
-    }
-
-    throw new InvalidOperationException("Could not locate repository root for tooling checks.");
-}
-
-static void AssertFileContains(string path, string expected, string message)
-{
-    if (!File.Exists(path))
-    {
-        throw new InvalidOperationException($"{message} Missing file: {path}");
-    }
-
-    var content = File.ReadAllText(path);
-    if (!content.Contains(expected, StringComparison.Ordinal))
-    {
-        throw new InvalidOperationException(message);
-    }
 }
 
 internal sealed class FakeRepository : IFormsRepository
