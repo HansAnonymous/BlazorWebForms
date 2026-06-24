@@ -33,6 +33,11 @@ Assert(dashboard.RecentEntries.Count > 0, "Seed creates demo entry.");
 var script = schema.GetCreateScript();
 Assert(script.Contains("[forms].[Forms]"), "Schema descriptor includes forms table.");
 Assert(script.Contains("[forms].[ApprovalSteps]"), "Schema descriptor includes approval steps table.");
+Assert(script.Contains("[RejectionReason] NVARCHAR(2000) NULL"), "Schema descriptor includes approval rejection reason column.");
+Assert(script.Contains("[forms].[FormInvitations]"), "Schema descriptor includes form invitations table.");
+Assert(script.Contains("[ScopeType] NVARCHAR(32) NOT NULL"), "Schema descriptor includes permission scope metadata.");
+Assert(script.Contains("IX_FormPermissions_FormId_ScopeType_ScopeValue"), "Schema descriptor includes permission scope index.");
+Assert(script.Contains("IX_Entries_FormId_Status_SubmittedByEmail_SubmittedUtc"), "Schema descriptor includes draft lookup index.");
 Assert(script.Contains("[Sha256] NVARCHAR(64) NOT NULL"), "Schema descriptor includes file hash metadata column.");
 Assert(script.Contains("[RevisionNumber] INT NOT NULL"), "Schema descriptor includes file revision metadata column.");
 
@@ -183,6 +188,13 @@ var revised = await forms.ReviseEntryAsync(submitted.Id, new Dictionary<string, 
 });
 Assert(revised.Revisions.Count == 2, "Edit appends revision instead of overwrite.");
 
+var remindersSent = await forms.SendApprovalRemindersAsync(newForm.Id);
+Assert(remindersSent >= 1, "Approval reminder flow sends notifications for pending steps.");
+
+var reminderDetail = await forms.GetEntryDetailAsync(submitted.Id);
+Assert(reminderDetail is not null, "Can reload entry detail after reminder dispatch.");
+Assert(reminderDetail!.Entry.ApprovalAuditTrail.Any(a => a.Action == ApprovalAuditAction.GraphApproverReminder), "Reminder audit events are persisted for SQL integration.");
+
 var approved = await forms.ApproveStepAsync(submitted.Id, revised.ApprovalSteps[0].Id, "Manager Sign");
 Assert(approved.Status == EntryStatus.Approved, "Approval progression updates status.");
 
@@ -332,7 +344,7 @@ Assert(perfPage.Count == 50, "Performance paging query returns bounded page size
 Assert(perfWatch.ElapsedMilliseconds < 5000, "Performance paging query remains within regression threshold.");
 
 // invitation flow smoke
-var invitation = await forms.CreateInvitationAsync(new CreateInvitationRequest
+var invitationToRevoke = await forms.CreateInvitationAsync(new CreateInvitationRequest
 {
     FormId = newForm.Id,
     Email = "invitee-sql@example.com",
@@ -340,10 +352,29 @@ var invitation = await forms.CreateInvitationAsync(new CreateInvitationRequest
     ScopeType = "Form",
     ValidFor = TimeSpan.FromDays(2)
 });
-Assert(invitation.Status == InvitationStatus.Pending, "Invitation persisted in SQL starts pending.");
+Assert(invitationToRevoke.Status == InvitationStatus.Pending, "Invitation persisted in SQL starts pending.");
 
-var storedInvitation = await repository.GetInvitationByTokenAsync(invitation.Token);
+var storedInvitation = await repository.GetInvitationByTokenAsync(invitationToRevoke.Token);
 Assert(storedInvitation is not null, "Invitation is queryable by token from SQL repository.");
+
+var revokedInvitation = await forms.RevokeInvitationAsync(invitationToRevoke.Id);
+Assert(revokedInvitation.Status == InvitationStatus.Revoked, "Invitation revoke flow updates SQL status.");
+
+var invitationToAccept = await forms.CreateInvitationAsync(new CreateInvitationRequest
+{
+    FormId = newForm.Id,
+    Email = "invitee-accept-sql@example.com",
+    Role = FormPermissionRole.Viewer,
+    ScopeType = "Form",
+    ValidFor = TimeSpan.FromDays(2)
+});
+Assert(invitationToAccept.Status == InvitationStatus.Pending, "Second invitation is pending before accept.");
+
+var acceptedInvitation = await forms.AcceptInvitationAsync(invitationToAccept.Token);
+Assert(acceptedInvitation.Status == InvitationStatus.Accepted, "Invitation accept flow updates SQL status.");
+
+var acceptedFromRepository = await repository.GetInvitationByTokenAsync(invitationToAccept.Token);
+Assert(acceptedFromRepository?.Status == InvitationStatus.Accepted, "Accepted invitation status persists in SQL repository.");
 
 Console.WriteLine("Infrastructure tests passed.");
 
