@@ -12,7 +12,24 @@ public enum FormFieldKind
     File,
     RichText,
     Signature,
-    RepeatableList
+    RepeatableList,
+    RankedChoice
+}
+
+public enum NumberDisplayKind
+{
+    Plain,
+    Unit,
+    Percentage
+}
+
+public enum RepeatableColumnKind
+{
+    Text,
+    TextArea,
+    Number,
+    Date,
+    Checkbox
 }
 
 public enum PrefillSourceKind

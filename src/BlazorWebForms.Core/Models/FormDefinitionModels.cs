@@ -2,7 +2,7 @@ namespace BlazorWebForms.Core.Models;
 
 public sealed class FormDefinition
 {
-    public static int CurrentSchemaVersion => 3;
+    public static int CurrentSchemaVersion => 4;
 
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
     public string Title { get; set; } = string.Empty;
@@ -61,6 +61,13 @@ public sealed class FormFieldDefinition
     public string RepeatableAddButtonText { get; set; } = "Add item";
     public int? MinItems { get; set; }
     public int? MaxItems { get; set; }
+    public List<RepeatableListColumnDefinition> RepeatableColumns { get; set; } = [];
+    public NumberDisplayKind NumberDisplayKind { get; set; } = NumberDisplayKind.Plain;
+    public string NumberUnit { get; set; } = string.Empty;
+    public decimal? MinValue { get; set; }
+    public decimal? MaxValue { get; set; }
+    public decimal? NumberStep { get; set; }
+    public int? RankCount { get; set; }
     public Dictionary<string, string> LocalizedLabels { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> LocalizedPlaceholders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> LocalizedHelpTexts { get; set; } = new(StringComparer.OrdinalIgnoreCase);
@@ -85,6 +92,18 @@ public sealed class FormFieldOption
     public string Value { get; set; } = string.Empty;
     public string Label { get; set; } = string.Empty;
     public Dictionary<string, string> LocalizedLabels { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+public sealed class RepeatableListColumnDefinition
+{
+    public string Id { get; set; } = $"col-{Guid.NewGuid():N}";
+    public string Label { get; set; } = "Column";
+    public RepeatableColumnKind Kind { get; set; } = RepeatableColumnKind.Text;
+    public string Placeholder { get; set; } = string.Empty;
+    public bool Required { get; set; }
+    public List<FormFieldOption> Options { get; set; } = [];
+    public Dictionary<string, string> LocalizedLabels { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> LocalizedPlaceholders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed class VisibilityConditionDefinition
