@@ -22,6 +22,13 @@ public static class BlazorWebFormsServiceCollectionExtensions
         services.AddScoped<FormsApplicationService>();
         return services;
     }
+
+    public static IServiceCollection AddCustomFieldHandler<T>(this IServiceCollection services)
+        where T : class, ICustomFieldHandler
+    {
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<ICustomFieldHandler, T>());
+        return services;
+    }w
 }
 
 internal sealed class NoOpEmployeePrefillProvider : IEmployeePrefillProvider

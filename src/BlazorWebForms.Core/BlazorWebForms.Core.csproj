@@ -4,7 +4,7 @@
 
     <!-- NuGet Package Metadata -->
     <PackageId>BlazorWebForms.Core</PackageId>
-    <Version>1.0.2</Version>
+    <Version>1.0.3</Version>
     <Authors>HansAnonymous</Authors>
     <Company>HansAnonymous</Company>
     <Description>Core library for BlazorWebForms - A library for building Blazor applications with WebForms-like patterns.</Description>
@@ -18,7 +18,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="TECHNICAL_REFERENCE.md" Pack="true" PackagePath="\README.md" />
   </ItemGroup>
 
   <ItemGroup>

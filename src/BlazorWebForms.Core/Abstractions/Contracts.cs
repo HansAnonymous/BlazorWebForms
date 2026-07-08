@@ -120,3 +120,9 @@ public interface IFormsRepository
     Task<FormInvitation?> GetInvitationByTokenAsync(string token, CancellationToken cancellationToken = default);
     Task SaveInvitationAsync(FormInvitation invitation, CancellationToken cancellationToken = default);
 }
+
+public interface ICustomFieldHandler
+{
+    string Kind { get; }
+    void ValidateDefinition(FormFieldDefinition field);
+}

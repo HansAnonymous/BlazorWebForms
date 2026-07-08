@@ -107,6 +107,7 @@ public sealed class ApprovalStepRecord
 {
     public Guid Id { get; set; } = Guid.NewGuid();
     public int Order { get; set; }
+    public string ApproverId { get; set; } = string.Empty;
     public string ApproverName { get; set; } = string.Empty;
     public string ApproverEmail { get; set; } = string.Empty;
     public ApprovalStepStatus Status { get; set; } = ApprovalStepStatus.Pending;

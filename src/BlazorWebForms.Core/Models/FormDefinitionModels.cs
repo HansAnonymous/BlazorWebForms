@@ -12,6 +12,7 @@ public sealed class FormDefinition
     public List<FormSectionDefinition> Sections { get; set; } = [];
     public Dictionary<string, string> LocalizedTitles { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> LocalizedDescriptions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> Metadata { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed class BrandingDefinition
@@ -37,6 +38,7 @@ public sealed class FormSectionDefinition
     public FormSectionLayoutDefinition? Layout { get; set; } = new();
     public Dictionary<string, string> LocalizedTitles { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> LocalizedDescriptions { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public Dictionary<string, string> Metadata { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<FormFieldDefinition> Fields { get; set; } = [];
 }
 
@@ -77,6 +79,8 @@ public sealed class FormFieldDefinition
     public List<string> AllowedMimeTypes { get; set; } = [];
     public List<string> AllowedExtensions { get; set; } = [];
     public List<FormFieldOption> Options { get; set; } = [];
+    public string CustomKind { get; set; } = string.Empty;
+    public Dictionary<string, string> Metadata { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed class FormFieldPrefillDefinition

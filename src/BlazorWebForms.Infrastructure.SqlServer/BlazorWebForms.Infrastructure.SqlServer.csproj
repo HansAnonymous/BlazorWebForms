@@ -4,7 +4,7 @@
 
     <!-- NuGet Package Metadata -->
     <PackageId>BlazorWebForms.Infrastructure.SqlServer</PackageId>
-    <Version>1.0.2</Version>
+    <Version>1.0.3</Version>
     <Authors>HansAnonymous</Authors>
     <Company>HansAnonymous</Company>
     <Description>SQL Server infrastructure implementation for BlazorWebForms - Provides Entity Framework Core integration for SQL Server persistence.</Description>
@@ -18,7 +18,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\..\README.md" Pack="true" PackagePath="\README.md" />
   </ItemGroup>
 
   <ItemGroup>
