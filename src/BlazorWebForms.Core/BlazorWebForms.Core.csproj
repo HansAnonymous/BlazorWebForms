@@ -18,7 +18,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <None Include="..\..\README.md" Pack="true" PackagePath="\" />
+    <None Include="TECHNICAL_REFERENCE.md" Pack="true" PackagePath="\README.md" />
   </ItemGroup>
 
   <ItemGroup>

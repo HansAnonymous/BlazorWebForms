@@ -1,18 +1,368 @@
-# BlazorWebForms.Core — Technical Reference
+# BlazorWebForms.Core
 
-Core package documentation and quick-start guide.
+[![NuGet](https://img.shields.io/nuget/v/BlazorWebForms.Core)](https://www.nuget.org/packages/BlazorWebForms.Core)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](https://github.com/HansAnonymous/BlazorWebForms/blob/main/LICENSE)
+[![.NET 10](https://img.shields.io/badge/.NET-10-purple)](https://dotnet.microsoft.com)
 
-## Documentation
+Core library for [BlazorWebForms](https://github.com/HansAnonymous/BlazorWebForms).
 
-The Core package includes comprehensive technical documentation:
+Provides the domain models, `FormsApplicationService`, and all extensibility interfaces. **No database, no UI framework, no email provider dependencies** — only `Microsoft.AspNetCore.App`.
 
-- **[CORE_API_REFERENCE.md](../../docs/CORE_API_REFERENCE.md)** — Complete `FormsApplicationService` API reference and service interfaces
-- **[CORE_MODELS.md](../../docs/CORE_MODELS.md)** — Domain model reference (FormAggregate, EntryRecord, FormDefinition, etc.)
-- **[CORE_LOCALIZATION.md](../../docs/CORE_LOCALIZATION.md)** — Localization, culture resolution, condition evaluation, and validation
-- **[CORE_EXTENDING.md](../../docs/CORE_EXTENDING.md)** — Implementing required and optional interfaces
-- **[QUESTION_TYPES.md](../../docs/QUESTION_TYPES.md)** — Every `FormFieldKind` explained with properties, validation rules, answer format, and examples
+---
 
-For integration guide and usage patterns: [docs/USING_BlazorWebForms.md](../../docs/USING_BlazorWebForms.md)
+## Installation
+
+```powershell
+dotnet add package BlazorWebForms.Core
+```
+
+---
+
+## Minimal Setup
+
+### 1. Register services
+
+```csharp
+// Program.cs
+using BlazorWebForms.Core.Services;
+
+builder.Services.AddBlazorWebFormsCore();
+
+// Required: implement ICurrentUserContext (see below)
+builder.Services.AddScoped<ICurrentUserContext, YourCurrentUserContext>();
+```
+
+### 2. Implement `ICurrentUserContext`
+
+This is the **only required implementation**. It tells the service layer who the current user is.
+
+```csharp
+using BlazorWebForms.Core.Abstractions;
+using BlazorWebForms.Core.Models;
+
+public sealed class YourCurrentUserContext(IHttpContextAccessor http) : ICurrentUserContext
+{
+    public UserProfile GetCurrentUser()
+    {
+        var principal = http.HttpContext?.User;
+        if (principal?.Identity is not { IsAuthenticated: true })
+            return new UserProfile { IsAuthenticated = false };
+
+        return new UserProfile
+        {
+            UserId      = Guid.Parse(principal.FindFirst("sub")?.Value ?? Guid.NewGuid().ToString()),
+            IsAuthenticated = true,
+            DisplayName = principal.FindFirst("name")?.Value ?? "User",
+            Email       = principal.FindFirst("email")?.Value ?? string.Empty,
+            Roles       = [FormPermissionRole.Submitter]
+        };
+    }
+}
+```
+
+See [CORE_EXTENDING.md](../../docs/CORE_EXTENDING.md) for cookie auth, OIDC, and Azure AD examples.
+
+### 3. Use `FormsApplicationService`
+
+```csharp
+[Inject] private FormsApplicationService Forms { get; set; } = null!;
+
+// Define and publish a form
+var draft = await Forms.SaveDraftAsync(new SaveDraftRequest
+{
+    Name = "Expense Claim",
+    Slug = "expense-claim",
+    Definition = new FormDefinition
+    {
+        DefaultCulture = "en-US",
+        Sections =
+        [
+            new FormSectionDefinition
+            {
+                Title = "Claim Details",
+                Fields =
+                [
+                    new FormFieldDefinition { Id = "amount",      Label = "Amount",      Kind = FormFieldKind.Number,  Required = true },
+                    new FormFieldDefinition { Id = "description", Label = "Description", Kind = FormFieldKind.TextArea, Required = true },
+                    new FormFieldDefinition { Id = "receipt",     Label = "Receipt",     Kind = FormFieldKind.File }
+                ]
+            }
+        ]
+    }
+});
+
+await Forms.PublishAsync(draft.Id);
+
+// Collect a submission with approvers
+var entry = await Forms.SubmitEntryAsync(draft.Id, new SubmitEntryRequest
+{
+    Answers   = new() { ["amount"] = "149.50", ["description"] = "Team lunch" },
+    Approvers = [new ApproverInput { Id = "E-1042", DisplayName = "Jane Smith", Email = "jane@corp.com" }]
+});
+```
+
+---
+
+## Field Types
+
+| Kind | Description |
+|---|---|
+| `Text` | Single-line text input |
+| `TextArea` | Multi-line text input |
+| `Number` | Numeric input with optional unit, min/max, step |
+| `Select` | Dropdown from a fixed option list |
+| `Radio` | Single-choice radio group |
+| `Checkbox` | Boolean toggle |
+| `Date` | Date picker |
+| `File` | File upload — count, size, MIME, and extension constraints |
+| `RichText` | HTML rich-text editor |
+| `Signature` | Typed signature with confirmation timestamp |
+| `RepeatableList` | Repeatable row set with typed columns |
+| `RankedChoice` | Drag-and-drop option ranking |
+| `Custom` | Developer-defined type — register an `ICustomFieldHandler` |
+
+See [QUESTION_TYPES.md](../../docs/QUESTION_TYPES.md) for full property reference, validation rules, and answer formats.
+
+---
+
+## Key APIs
+
+### Form lifecycle
+
+```csharp
+BuilderState           state  = await Forms.GetBuilderStateAsync(formId);
+FormAggregate          form   = await Forms.SaveDraftAsync(request);
+FormAggregate          form   = await Forms.PublishAsync(formId);
+DashboardViewModel     dash   = await Forms.GetDashboardAsync();
+PublishedFormViewModel view   = await Forms.GetPublishedFormAsync(slug);
+```
+
+### Submissions
+
+```csharp
+EntryRecord                  entry  = await Forms.SubmitEntryAsync(formId, request);
+EntryRecord                  draft  = await Forms.SaveDraftSubmissionAsync(formId, request);
+EntryRecord                  draft  = await Forms.GetDraftSubmissionAsync(formId);
+EntryRecord                  entry  = await Forms.ResubmitEntryAsync(entryId, request);
+EntryDetailViewModel         detail = await Forms.GetEntryDetailAsync(entryId);
+IReadOnlyList<EntryRecord>   page   = await Forms.QueryEntriesAsync(options);
+```
+
+### Approval workflow
+
+```csharp
+EntryRecord entry = await Forms.ApproveStepAsync(entryId, stepId, signature);
+EntryRecord entry = await Forms.RejectStepAsync(entryId, stepId, reason);
+```
+
+### Files and export
+
+```csharp
+StoredFile        file     = await Forms.StoreFileAsync(request);
+EntryFileDownload download = await Forms.OpenEntryFileAsync(entryId, fileId);
+EntryPdfExport    pdf      = await Forms.ExportEntryPdfAsync(entryId);
+```
+
+### Invitations
+
+```csharp
+FormInvitation inv = await Forms.CreateInvitationAsync(request);
+FormInvitation inv = await Forms.AcceptInvitationAsync(token);
+await Forms.RevokeInvitationAsync(invitationId);
+```
+
+See [CORE_API_REFERENCE.md](../../docs/CORE_API_REFERENCE.md) for the complete method reference.
+
+---
+
+## Extensibility Interfaces
+
+| Interface | Required | Default | Purpose |
+|---|---|---|---|
+| `ICurrentUserContext` | **Yes** | none | Current authenticated user |
+| `IFormsRepository` | Yes (via infra) | `EfFormsRepository` | Persistence |
+| `IPermissionEvaluator` | No | `DefaultPermissionEvaluator` | Role-based access control |
+| `IConditionEvaluator` | No | `SimpleConditionEvaluator` | Visibility rule evaluation |
+| `IFormDefinitionSerializer` | No | `JsonFormDefinitionSerializer` | Form schema serialization |
+| `IFileStorage` | No | `LocalFileStorage` | Binary file persistence |
+| `IEmailNotifier` | No | `MemoryEmailNotifier` | Workflow email dispatch |
+| `IPdfExporter` | No | `TextPdfExporter` | Entry PDF generation |
+| `IAntiAbuseGuard` | No | `NoOpAntiAbuseGuard` | Rate limiting |
+| `IOperationalTelemetry` | No | `NoOpOperationalTelemetry` | Metrics and counters |
+| `IEmployeePrefillProvider` | No | no-op | Employee data for prefill |
+| `IFormPrefillProvider` | No | claim / employee / fixed | Field value prefill |
+| `ICustomFieldHandler` | No | none | Custom `FormFieldKind.Custom` handler |
+
+Register your own implementation before calling `AddBlazorWebFormsCore()`, or use `TryAdd*` so the built-in acts as a fallback.
+
+---
+
+## Custom Field Types
+
+```csharp
+// 1. Implement the interface
+public sealed class RatingFieldHandler : ICustomFieldHandler
+{
+    public string Kind => "rating";
+
+    public void ValidateDefinition(FormFieldDefinition field)
+    {
+        if (!field.Metadata.TryGetValue("maxStars", out var raw)
+            || !int.TryParse(raw, out var stars)
+            || stars is < 1 or > 10)
+        {
+            throw new InvalidOperationException(
+                $"Field '{field.Label}': Metadata['maxStars'] must be an integer 1-10.");
+        }
+    }
+}
+
+// 2. Register it
+builder.Services.AddCustomFieldHandler<RatingFieldHandler>();
+
+// 3. Use it in a definition
+new FormFieldDefinition
+{
+    Id         = "satisfaction",
+    Kind       = FormFieldKind.Custom,
+    CustomKind = "rating",
+    Label      = "Satisfaction",
+    Required   = true,
+    Metadata   = new() { ["maxStars"] = "5" }
+}
+```
+
+`ValidateDefinition` is called during `PublishAsync`. If no handler is registered for a `CustomKind`, the field passes as-is — ideal for types rendered purely by the Blazor layer.
+
+---
+
+## Metadata
+
+Attach arbitrary key/value pairs to forms, sections, or fields:
+
+```csharp
+definition.Metadata["department"]  = "HR";
+definition.Metadata["process-id"]  = "onboarding-v3";
+
+section.Metadata["layout-hint"]    = "two-column";
+
+field.Metadata["helpdesk-tag"]     = "expense-category";
+```
+
+Metadata is serialized with the form definition JSON and round-trips through storage unchanged.
+
+---
+
+## Localization
+
+```csharp
+var definition = new FormDefinition
+{
+    DefaultCulture = "en-US",
+    Title          = "Travel Request",
+    LocalizedTitles = new() { ["fr-FR"] = "Demande de voyage" }
+};
+
+field.Label = "Destination";
+field.LocalizedLabels["fr-FR"] = "Destination";
+```
+
+Culture resolution: **requested culture → language → default culture → base text**.
+
+---
+
+## Visibility Conditions
+
+```csharp
+field.VisibilityRules = new VisibilityConditionDefinition
+{
+    Join  = VisibilityJoinOperator.And,
+    Rules =
+    [
+        new VisibilityRuleDefinition
+        {
+            FieldId  = "employment-status",
+            Operator = VisibilityRuleOperator.Equals,
+            Value    = "employed"
+        }
+    ]
+};
+```
+
+Operators: `Equals`, `NotEquals`, `Contains`, `Empty`. Join modes: `And`, `Or`.
+
+---
+
+## Domain Model Overview
+
+```
+FormAggregate
+  └─ FormDefinition
+       ├─ Metadata                        Dictionary<string, string>
+       ├─ LocalizedTitles / Descriptions
+       ├─ Branding                        logo, colors, hero text
+       └─ FormSectionDefinition[]
+            ├─ Metadata
+            ├─ VisibilityRules
+            └─ FormFieldDefinition[]
+                 ├─ Kind / CustomKind
+                 ├─ Metadata
+                 ├─ Options / RepeatableColumns
+                 └─ Prefill / VisibilityRules
+
+EntryRecord
+  ├─ Status           Draft | Submitted | NeedsApproval | Approved | Rejected
+  ├─ Answers          Dictionary<string, string?>
+  ├─ ApprovalSteps    ApprovalStepRecord[]  (ApproverId, ApproverName, ApproverEmail)
+  ├─ ApprovalAuditTrail  ApprovalAuditEvent[]
+  └─ Files            EntryFileRecord[]
+```
+
+See [CORE_MODELS.md](../../docs/CORE_MODELS.md) for the complete property reference.
+
+---
+
+## Package Layout
+
+```
+BlazorWebForms.Core/
+├── Abstractions/
+│   ├── Contracts.cs              # All service interfaces
+│   └── ICoreMetadataCache.cs
+├── Models/
+│   ├── DomainModels.cs           # FormAggregate, EntryRecord, ApprovalStepRecord…
+│   ├── Enums.cs                  # FormFieldKind, EntryStatus, FormAccessMode…
+│   ├── FormDefinitionModels.cs   # FormDefinition, FormSectionDefinition…
+│   └── ViewModels.cs             # Request/response objects
+└── Services/
+    ├── FormsApplicationService.cs # Main entry point
+    ├── DefaultImplementations.cs  # IPermissionEvaluator, IConditionEvaluator
+    ├── BlazorWebFormsServiceCollectionExtensions.cs
+    ├── FormLocalizationResolver.cs
+    └── FormLayoutResolver.cs
+```
+
+---
+
+## Testing
+
+```powershell
+dotnet run --project tests/BlazorWebForms.Core.Tests -c Debug
+```
+
+---
+
+## Further Reading
+
+| Document | Description |
+|---|---|
+| [CORE_API_REFERENCE.md](../../docs/CORE_API_REFERENCE.md) | Complete `FormsApplicationService` API |
+| [CORE_MODELS.md](../../docs/CORE_MODELS.md) | Full domain model reference |
+| [CORE_EXTENDING.md](../../docs/CORE_EXTENDING.md) | Interface implementations and auth examples |
+| [CORE_LOCALIZATION.md](../../docs/CORE_LOCALIZATION.md) | Localization and condition evaluation |
+| [QUESTION_TYPES.md](../../docs/QUESTION_TYPES.md) | Every field type documented |
+| [Repository README](../../README.md) | Project overview and sample app setup |
+
 
 ---
 

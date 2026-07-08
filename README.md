@@ -1,166 +1,232 @@
-# BlazorWebForms — Run & Dev Guide
+# BlazorWebForms
 
-Quick guide: run sample app with SQL persistence and apply EF migrations.
+**Structured form collection for Blazor applications.**  
+Define forms as data, collect submissions, run approval workflows, and export results — without rebuilding UI for every new process.
 
-Developer docs for using and iterating from another solution: [docs/USING_BlazorWebForms.md](docs/USING_BlazorWebForms.md)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
+[![.NET 10](https://img.shields.io/badge/.NET-10-purple)](https://dotnet.microsoft.com)
+[![NuGet](https://img.shields.io/nuget/v/BlazorWebForms.Core)](https://www.nuget.org/packages/BlazorWebForms.Core)
 
-Prereqs
-- .NET 8/10 SDK installed
-- LocalDB (SQL Server Express LocalDB) or SQL Server accessible
+---
 
-Install EF CLI (if not already):
+## What is BlazorWebForms?
 
-```powershell
-dotnet tool install --global dotnet-ef
+BlazorWebForms is a library that lets you define forms as structured data (`FormDefinition`), render them dynamically, and collect submissions with full workflow support — all from a Blazor application.
+
+**You describe a form once. The library handles rendering, validation, drafts, file uploads, multi-step approvals, email notifications, PDF export, and search indexing.**
+
+---
+
+## Packages
+
+| Package | Purpose |
+|---|---|
+| [`BlazorWebForms.Core`](src/BlazorWebForms.Core/) | Domain models, `FormsApplicationService`, all interfaces. Zero UI and zero DB dependencies. |
+| [`BlazorWebForms.Infrastructure.SqlServer`](src/BlazorWebForms.Infrastructure.SqlServer/) | EF Core persistence (SQL Server/Azure SQL), file storage, email (SMTP, SendGrid, Graph), PDF export. |
+| `BlazorWebForms.Blazor` | Razor components — form builder workspace, dynamic renderer, admin dashboards. |
+
+---
+
+## Architecture
+
+```
+Your Blazor App
+      │
+      ▼
+FormsApplicationService          ← single entry point for all operations
+      │
+      ├── IFormsRepository       ← persistence (implemented by Infrastructure.SqlServer)
+      ├── IFileStorage           ← file storage (local disk or bring your own)
+      ├── IEmailNotifier         ← email (SMTP / SendGrid / Graph / no-op)
+      ├── IPermissionEvaluator   ← role-based access (override for custom rules)
+      ├── ICurrentUserContext    ← who is logged in (you implement this)
+      └── ICustomFieldHandler[]  ← optional: register your own field types
 ```
 
-Restore and build:
+Core has **no dependency** on any database, email provider, or UI framework. Every integration point is an interface you can swap.
+
+---
+
+## Quick Start
+
+### 1. Install packages
 
 ```powershell
+dotnet add package BlazorWebForms.Core
+dotnet add package BlazorWebForms.Infrastructure.SqlServer
+```
+
+### 2. Register services
+
+```csharp
+// Program.cs
+builder.Services.AddBlazorWebFormsCore();
+
+builder.Services.AddBlazorWebFormsSqlServer(opt =>
+{
+    opt.ConnectionString = builder.Configuration.GetConnectionString("BlazorWebForms")!;
+    opt.StorageRoot = Path.Combine(builder.Environment.ContentRootPath, "uploads");
+});
+
+// Required: tell the service who the current user is
+builder.Services.AddScoped<ICurrentUserContext, YourCurrentUserContext>();
+```
+
+### 3. Apply database schema
+
+On first run, call `SeedAsync` to create tables automatically:
+
+```csharp
+await app.Services.GetRequiredService<FormsApplicationService>().SeedAsync();
+```
+
+Or generate a migration script for review before applying:
+
+```powershell
+dotnet ef migrations script \
+  --project src/BlazorWebForms.Infrastructure.SqlServer \
+  --startup-project src/BlazorWebForms.SampleApp
+```
+
+### 4. Create and publish a form
+
+```csharp
+var draft = await formsService.SaveDraftAsync(new SaveDraftRequest
+{
+    Name = "Travel Request",
+    Slug = "travel-request",
+    Definition = new FormDefinition
+    {
+        DefaultCulture = "en-US",
+        Sections =
+        [
+            new FormSectionDefinition
+            {
+                Title = "Trip Details",
+                Fields =
+                [
+                    new FormFieldDefinition { Id = "destination", Label = "Destination", Kind = FormFieldKind.Text, Required = true },
+                    new FormFieldDefinition { Id = "depart-date", Label = "Departure date", Kind = FormFieldKind.Date, Required = true },
+                    new FormFieldDefinition { Id = "reason",      Label = "Reason",         Kind = FormFieldKind.TextArea }
+                ]
+            }
+        ]
+    }
+});
+
+await formsService.PublishAsync(draft.Id);
+```
+
+### 5. Accept a submission
+
+```csharp
+var entry = await formsService.SubmitEntryAsync(formId, new SubmitEntryRequest
+{
+    Answers = new() { ["destination"] = "Paris", ["depart-date"] = "2026-09-01" },
+    Approvers = [new ApproverInput { Id = "E-1042", DisplayName = "Jane Smith", Email = "jane@example.com" }]
+});
+```
+
+---
+
+## Feature Overview
+
+### Forms
+- **13 built-in field types** — Text, TextArea, Number, Select, Radio, Checkbox, Date, File, RichText, Signature, RepeatableList, RankedChoice, and `Custom` (bring your own)
+- **Visibility conditions** — show/hide sections and fields using AND/OR rules against other field values
+- **Localization** — per-field/section/option localized labels with culture fallback chain
+- **Branding** — logo, hero image, accent color, button radius, surface color per form
+- **Metadata bags** — attach arbitrary `Dictionary<string, string>` to forms, sections, and fields
+- **Schema versioning** — definitions carry a `SchemaVersion` for forward-compatibility handling
+
+### Submissions
+- **Draft flow** — save, resume, and finalize multi-session drafts
+- **Immutable revisions or overwrite-latest** — configurable per form
+- **File uploads** — per-field constraints (size, MIME type, extension, file count)
+- **Search indexing** — mark fields as `Searchable`; text index is maintained on save
+
+### Approvals
+- **Sequential multi-step approval** — one approver per step, ordered
+- **Approve / reject / resubmit** — full state machine with server-side invariant enforcement
+- **Audit trail** — every action is appended to an immutable `ApprovalAuditEvent` log
+- **Approver identity** — `Id` (employee ID), `DisplayName`, and `Email` on each step
+- **Email notifications** — assignment, reminder, approval, rejection, and resubmit events
+
+### Infrastructure (SqlServer package)
+- **EF Core 10** persistence with SQL Server / Azure SQL
+- **Idempotent schema bootstrap** — `SeedAsync` applies column additions without a full migration runner
+- **Local file storage** — safe filename normalization, SHA-256 hash, signed short-lived download links
+- **Text PDF export** — structured entry export with configurable row/size limits
+- **Email strategies** — `DryRun` (default), `Smtp`, `SendGrid`, `Graph` (Microsoft 365)
+- **Anti-abuse guards** — per-minute upload and notification rate limits
+- **Draft cleanup** — background removal of stale drafts and orphaned files (configurable retention)
+- **Operational telemetry** — upload/PDF/email counters via `IOperationalTelemetry`
+
+### Extensibility
+- Register custom field types with `AddCustomFieldHandler<T>()`
+- Override any default implementation (`IPermissionEvaluator`, `IConditionEvaluator`, `IFileStorage`, …)
+- Plug in prefill providers (`IFormPrefillProvider`) for claim-based, employee-based, or custom data
+
+---
+
+## Documentation
+
+| Document | Description |
+|---|---|
+| [docs/USING_BlazorWebForms.md](docs/USING_BlazorWebForms.md) | Integration guide — NuGet, local feed, ProjectReference |
+| [docs/CORE_MODELS.md](docs/CORE_MODELS.md) | Complete domain model reference |
+| [docs/CORE_API_REFERENCE.md](docs/CORE_API_REFERENCE.md) | Full `FormsApplicationService` API |
+| [docs/CORE_EXTENDING.md](docs/CORE_EXTENDING.md) | Implementing interfaces, auth examples, custom field types |
+| [docs/CORE_LOCALIZATION.md](docs/CORE_LOCALIZATION.md) | Localization, culture resolution, condition evaluation |
+| [docs/QUESTION_TYPES.md](docs/QUESTION_TYPES.md) | Every field kind with properties, validation, and examples |
+| [src/BlazorWebForms.Core/README.md](src/BlazorWebForms.Core/README.md) | Core package reference |
+| [src/BlazorWebForms.Infrastructure.SqlServer/README.md](src/BlazorWebForms.Infrastructure.SqlServer/README.md) | SQL Server package reference |
+
+---
+
+## Running the Sample App
+
+Prerequisites: .NET 10 SDK, SQL Server or LocalDB.
+
+```powershell
+# Restore and build
 dotnet restore
 dotnet build -c Debug
-```
 
-Apply migrations (creates database):
+# Apply database schema
+dotnet ef database update \
+  --project src/BlazorWebForms.Infrastructure.SqlServer/BlazorWebForms.Infrastructure.SqlServer.csproj \
+  --startup-project src/BlazorWebForms.SampleApp/BlazorWebForms.SampleApp.csproj
 
-```powershell
-dotnet ef database update --project src/BlazorWebForms.Infrastructure.SqlServer/BlazorWebForms.Infrastructure.SqlServer.csproj --startup-project src/BlazorWebForms.SampleApp/BlazorWebForms.SampleApp.csproj
-```
-
-Run sample app:
-
-```powershell
+# Run
 dotnet run --project src/BlazorWebForms.SampleApp/BlazorWebForms.SampleApp.csproj -c Debug
 ```
 
-Configuration
-- Development connection string: `src/BlazorWebForms.SampleApp/appsettings.Development.json` → `ConnectionStrings:BlazorWebForms`.
-- Optional schema override: `BlazorWebFormsSqlServer:SchemaName` in same file.
-- Storage root defaults to `<SampleApp content root>/App_Data/uploads` but can be set in `Program.cs` or via options in `AddBlazorWebFormsSqlServer`.
-- Development auth: sample app now uses cookie authentication. Use the top-right "Dev login" controls in the app shell to sign in as `Manager`, `Owner`, `Approver`, or `Admin`.
-- Auth assumptions: stable user id is derived from NameIdentifier/sub/oid claim (or deterministic fallback), display name from `name`/identity name, email from `email` claim.
-- Unauthorized route handling: protected routes now show explicit `Sign in required` for anonymous users and `Access denied` for authenticated users without required roles.
-- Invitation endpoints (optional module):
-  - `POST /invitations/create` (authorized: Admin/Owner/Manager)
-  - `POST /invitations/accept` (authorized: authenticated user)
-  - `POST /invitations/revoke/{invitationId}` (authorized: Admin/Owner/Manager)
-- Invitation notifications: invitation create/accept/revoke events now flow through `IEmailNotifier` integration points.
-- Email adapter template values are provided in `src/BlazorWebForms.SampleApp/appsettings.Development.json` under `BlazorWebFormsSqlServer`.
+**Configuration** (`src/BlazorWebForms.SampleApp/appsettings.Development.json`):
 
-Builder + schema completeness (Milestone 3)
-- `FormDefinition` now includes explicit `SchemaVersion` with compatibility handling for legacy payloads.
-- Builder supports structured conditional rules (AND/OR + equals/not-equals/contains/empty), section/field layout metadata, localization maps, and branding token configuration.
-- Published renderer applies localization fallback (`requested culture` -> `language` -> `default culture` -> `base text`) and branding tokens/assets with safe defaults.
-- Save/publish validation gates enforce schema integrity, condition references, localization culture/value shape, and branding asset/style sanitization.
+| Key | Default | Notes |
+|---|---|---|
+| `ConnectionStrings:BlazorWebForms` | LocalDB | SQL Server connection string |
+| `BlazorWebFormsSqlServer:SchemaName` | `bwf` | Optional schema prefix |
+| `BlazorWebForms:FileDownloadTokenSecret` | dev fallback | Override before production |
 
-Submissions + workflow completeness (Milestone 4)
-- Per-form edit policy supports immutable revision mode and overwrite-latest mode (enforced in service layer).
-- Draft submissions are supported with save/resume/finalize flow (draft-aware submit path).
-- Approval workflow supports approve/reject/resubmit with guarded next-step transitions and server-side invariant enforcement.
-- Approval notifications expose assignment/reminder hooks with idempotency keys; local memory notifier remains default implementation.
-- Approval audit trail is persisted append-only and shown in entry detail/admin filtering views.
+**Dev login**: use the top-right "Dev login" controls in the sample app shell to sign in as `Manager`, `Owner`, `Approver`, or `Admin`.
 
-Files hardening progress (Milestone 5 in progress)
-- File fields now support optional constraints (`MaxFileSizeBytes`, `MaxFileCount`, `AllowedMimeTypes`, `AllowedExtensions`).
-- Published form renderer enforces size/extension/MIME constraints before storage and displays active constraints in UI help text.
-- Published form renderer now supports multiple file selection per field when `MaxFileCount > 1`.
-- Local file storage now enforces environment toggle + size limits, normalizes unsafe file names, and uses generated storage keys.
-- Local file storage also validates extension and MIME allow-lists when provided.
-- Entry-file downloads now use service-layer authorization checks plus short-lived signed links (`/entry-files/{entryId}/{fileId}?token=...`).
-- File metadata now persists hash (`Sha256`), uploader identity (`UploadedByUserId`, `UploadedByEmail`), and revision linkage (`RevisionNumber`).
-- Stale-draft cleanup flow is available via service API (`CleanupStaleDraftFilesAsync`) to remove orphaned bytes and old draft rows.
-- Retention hooks are configurable via SQL options (`EnableDraftCleanup`, `DraftRetentionPeriod`).
+---
 
-PDF export progress (Milestone 5 in progress)
-- Entry PDF export is now exposed via service API (`ExportEntryPdfAsync`) and sample endpoint `GET /entry-pdf/{entryId}`.
-- Export payload includes form metadata, localized section/field answers, file metadata, approval steps, and approval audit entries.
-- Export safeguards are configurable through SQL options (`PdfMaxAnswerRows`, `PdfMaxAuditRows`, `PdfMaxBytes`).
-- Historical PDF export binds to the submitted `FormVersionId` context for entry rendering.
-
-Email notification progress (Milestone 5 in progress)
-- Provider-style notifier (`TemplateEmailNotifier`) is now default SQL registration with template-based message payloads.
-- Workflow notifications now include submit, approver assignment/reminder, approval, rejection, and invitation lifecycle events.
-- Retry/backoff and idempotency de-duplication are built into notifier flow (`EmailRetryCount`, `EmailRetryDelayMs`, idempotency key tracking).
-- Outbound email can be disabled by environment via `EnableOutboundEmail` (sample app disables in non-production).
-- Email provider strategy now supports `DryRun`, `Smtp`, `SendGrid`, and `Graph` through the shared integration interface (`IEmailIntegration`).
-- Strategy and provider settings are configurable under `BlazorWebFormsSqlServer:*` (SMTP host/port/auth, SendGrid API key, Graph sender/token).
-
-Security/compliance baseline progress (Milestone 5 in progress)
-- Assigned approvers are authorized to view entry details/files through service-layer access checks.
-- Anti-abuse quota hooks are active for uploads and outbound notifications via `IAntiAbuseGuard` (`MaxUploadsPerMinute`, `MaxNotificationsPerMinute`).
-- Draft cleanup retention is configurable with `DraftRetentionPeriod` and feature toggle `EnableDraftCleanup`.
-- Graph correlation IDs are captured in approval audit events for external-operation traceability.
-- Notification template/log payloads avoid direct entry-id leakage in outbound body text.
-- Compliance region note hook is available via `DataResidenceRegion` (set per environment).
-
-UX/observability progress (Milestone 6 implemented)
-- File upload controls now show in-flight upload state and field-level failure messages.
-- Entry detail page now shows PDF generation state and status messaging.
-- Admin dashboards now include per-entry notification delivery status indicators.
-- Operational telemetry hooks are available for upload/PDF/email counters via `IOperationalTelemetry` (default in-memory implementation).
-
-Accessibility remediation progress (Milestone 6 implemented)
-- Dynamic form renderers (package + sample) now include stronger semantic/ARIA wiring (`aria-required`, `aria-invalid`, `aria-describedby`) with explicit label ids and grouped radio semantics.
-- Upload failures now render accessible error summaries linked to field anchors and move focus to the summary after async upload failures.
-- Sample shell now includes a keyboard skip link and a focusable main landmark target for faster keyboard navigation.
-- Async status text for loading/PDF/file-attachment feedback now uses polite live regions where applicable.
-- Shared CSS now includes focus-visible outlines and visually-hidden utility classes for accessibility support.
-
-Visual accessibility/responsiveness progress (Milestone 6 implemented)
-- Navigation and interactive controls now use larger minimum touch-target sizing across app shell/forms/actions (44px baseline).
-- Contrast for key nav states and link hover/readability was tightened in sidebar/theme styles.
-- Admin entries tables now render in horizontal scroll regions with keyboard-focusable wrappers for smaller viewports.
-- Mobile action groups now stack full-width buttons for better spacing and tap reliability on input-heavy routes.
-- Non-text decorative elements now have companion text alternatives where needed in shell/navigation.
-
-Internationalization progress (Milestone 6 implemented)
-- Request localization is enabled in the sample pipeline with supported cultures (`en-US`, `fr-FR`, `es-ES`, `ar-SA`) and query/cookie/Accept-Language providers.
-- App shell now exposes culture switching and persists culture via request-localization cookie endpoint (`/culture/set`).
-- Core sample UI strings are localized through a shared app localizer with deterministic fallback (`specific culture` -> `language` -> `en` -> `key`).
-- Published/sample dynamic renderer now resolves localized section/field/option content consistently at render time.
-- App root now emits culture-aware `lang` and RTL-aware `dir`; key date rendering now formats using current culture.
-
-Performance/scalability progress (Milestone 6 implemented)
-- Entry query options now support server-side paging primitives (`Offset`, `Limit`) across in-memory and SQL repository implementations.
-- Admin entry dashboards (sample + package) now use paged loading with next/previous controls to avoid loading large datasets in one render.
-- Core service now normalizes query limits (default/bounded) to reduce unbounded entry fetches in common admin paths.
-- Added short-lived metadata caching for frequently-read views (dashboard and published-form-by-slug) with invalidation on form/entry/invitation mutations.
-- Added regression assertions in both core and SQL executable tests to validate paging-limit behavior.
-
-Reliability/UX refinement progress (Milestone 6 implemented)
-- Builder and published-form sample views now include standardized loading, recoverable-error, and retry states for data-load failures.
-- Long-running save/publish/submit actions now include timeout guardrails and explicit retry guidance messaging.
-- Published-form submit flow now supports retrying the most recent failed submission attempt without re-entering form data.
-- Status messaging is now consistently exposed through live/status-friendly patterns in key interactive routes.
-- Operational telemetry now captures failure-context counters (`area`, `operation`, `reason`) in addition to success/failure aggregates.
-
-Tests/tooling progress (Milestone 6 implemented)
-- Added automated accessibility guard checks in executable tests for key semantics (`aria-describedby`, radiogroup role, skip-link presence).
-- Added localization fallback regression checks in executable tests to verify missing-localization fallback behavior.
-- Added performance regression checks for large-form/paged-query scenarios (bounded result windows with timing threshold assertions).
-- Added responsive-layout guard checks in executable tests for mobile breakpoint/media-query presence and stacked-action behavior tokens.
-- Existing core and SQL executable test commands remain the single-command regression path for milestone validation.
-
-Signed download token configuration
-- Configure `BlazorWebForms:FileDownloadTokenSecret` for non-development environments.
-- Default in-app fallback secret is for local development only and should be overridden before production use.
-
-Migrations
-- Migration files live in `src/BlazorWebForms.Infrastructure.SqlServer/Migrations/`.
-- Generate and review SQL script before apply:
+## Running Tests
 
 ```powershell
-dotnet ef migrations script --project src/BlazorWebForms.Infrastructure.SqlServer/BlazorWebForms.Infrastructure.SqlServer.csproj --startup-project src/BlazorWebForms.SampleApp/BlazorWebForms.SampleApp.csproj
+# Core isolated unit tests
+dotnet run --project tests/BlazorWebForms.Core.Tests -c Debug
+
+# SQL Server integration tests (requires LocalDB)
+dotnet run --project tests/BlazorWebForms.Infrastructure.SqlServer.Tests -c Debug
 ```
 
-- SQL compatibility note: current migrations use SQL Server/Azure SQL compatible types (`uniqueidentifier`, `nvarchar`, `datetimeoffset`, `rowversion`) and are validated in local integration runs.
+---
 
-Tests
+## License
 
-```powershell
-dotnet run --project tests/BlazorWebForms.Infrastructure.SqlServer.Tests/BlazorWebForms.Infrastructure.SqlServer.Tests.csproj -c Debug
-```
+[AGPL-3.0-only](LICENSE). Commercial licensing inquiries: open an issue.
 
-Notes
-- Sample app `Program.cs` binds `ConnectionStrings:BlazorWebForms` automatically when present.
-- If using a remote SQL Server, update connection string accordingly and ensure firewall access.
