@@ -11,6 +11,7 @@ public sealed class FormsApplicationService(
     IPermissionEvaluator permissionEvaluator,
     ICurrentUserContext currentUserContext,
     IEnumerable<IFormPrefillProvider> prefillProviders,
+    IEnumerable<ICustomFieldHandler> customFieldHandlers,
     IEmailNotifier emailNotifier,
     IFileStorage fileStorage,
     IPdfExporter pdfExporter,
@@ -221,7 +222,8 @@ public sealed class FormsApplicationService(
             .Select((approver, index) => new ApprovalStepRecord
             {
                 Order = index + 1,
-                ApproverName = approver.Name,
+                ApproverId = approver.Id,
+                ApproverName = !string.IsNullOrEmpty(approver.DisplayName) ? approver.DisplayName : approver.Name,
                 ApproverEmail = approver.Email
             })
             .ToList();
@@ -299,7 +301,8 @@ public sealed class FormsApplicationService(
             .Select((approver, index) => new ApprovalStepRecord
             {
                 Order = index + 1,
-                ApproverName = approver.Name,
+                ApproverId = approver.Id,
+                ApproverName = !string.IsNullOrEmpty(approver.DisplayName) ? approver.DisplayName : approver.Name,
                 ApproverEmail = approver.Email
             })
             .ToList();
@@ -372,7 +375,8 @@ public sealed class FormsApplicationService(
             .Select((approver, index) => new ApprovalStepRecord
             {
                 Order = index + 1,
-                ApproverName = approver.Name,
+                ApproverId = approver.Id,
+                ApproverName = !string.IsNullOrEmpty(approver.DisplayName) ? approver.DisplayName : approver.Name,
                 ApproverEmail = approver.Email
             })
             .ToList();
@@ -577,7 +581,8 @@ public sealed class FormsApplicationService(
             .Select((approver, index) => new ApprovalStepRecord
             {
                 Order = index + 1,
-                ApproverName = approver.Name,
+                ApproverId = approver.Id,
+                ApproverName = !string.IsNullOrEmpty(approver.DisplayName) ? approver.DisplayName : approver.Name,
                 ApproverEmail = approver.Email,
                 Status = ApprovalStepStatus.Pending
             })
@@ -1077,7 +1082,7 @@ public sealed class FormsApplicationService(
                string.Equals(prefill.ProviderKey, provider.ProviderKey, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static void ValidateDefinitionForPublish(FormDefinition definition)
+    private void ValidateDefinitionForPublish(FormDefinition definition)
     {
         if (definition.SchemaVersion <= 0 || definition.SchemaVersion > FormDefinition.CurrentSchemaVersion)
         {
@@ -1264,6 +1269,18 @@ public sealed class FormsApplicationService(
                     {
                         throw new InvalidOperationException($"Field '{field.Label}' default value must match an option value.");
                     }
+                }
+
+                if (field.Kind == FormFieldKind.Custom)
+                {
+                    if (string.IsNullOrWhiteSpace(field.CustomKind))
+                    {
+                        throw new InvalidOperationException($"Field '{field.Label}' must specify a CustomKind when Kind is Custom.");
+                    }
+
+                    var handler = customFieldHandlers.FirstOrDefault(h =>
+                        string.Equals(h.Kind, field.CustomKind, StringComparison.OrdinalIgnoreCase));
+                    handler?.ValidateDefinition(field);
                 }
             }
         }

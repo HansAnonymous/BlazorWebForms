@@ -97,6 +97,7 @@ public class ApprovalStepEntity
     public Guid EntryId { get; set; }
     public EntryEntity? Entry { get; set; }
     public int Order { get; set; }
+    public string ApproverId { get; set; } = string.Empty;
     public string ApproverName { get; set; } = string.Empty;
     public string ApproverEmail { get; set; } = string.Empty;
     public int Status { get; set; }

@@ -339,6 +339,14 @@ internal sealed class EfFormsRepository : IFormsRepository
                 ADD [RejectionReason] NVARCHAR(2000) NULL;
             END;
 
+            IF OBJECT_ID(N'ApprovalSteps', N'U') IS NOT NULL
+               AND COL_LENGTH(N'ApprovalSteps', N'ApproverId') IS NULL
+            BEGIN
+                ALTER TABLE [ApprovalSteps]
+                ADD [ApproverId] NVARCHAR(256) NOT NULL
+                    CONSTRAINT [DF_ApprovalSteps_ApproverId] DEFAULT (N'');
+            END;
+
             IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
                AND COL_LENGTH(N'Forms', N'PublicationEditMode') IS NULL
             BEGIN
@@ -718,6 +726,7 @@ internal sealed class EfFormsRepository : IFormsRepository
                 {
                     Id = a.Id,
                     Order = a.Order,
+                    ApproverId = a.ApproverId,
                     ApproverName = a.ApproverName,
                     ApproverEmail = a.ApproverEmail,
                     Status = (int)a.Status,
@@ -729,6 +738,7 @@ internal sealed class EfFormsRepository : IFormsRepository
             }
 
             existingStep.Order = a.Order;
+            existingStep.ApproverId = a.ApproverId;
             existingStep.ApproverName = a.ApproverName;
             existingStep.ApproverEmail = a.ApproverEmail;
             existingStep.Status = (int)a.Status;
@@ -1029,6 +1039,7 @@ internal sealed class EfFormsRepository : IFormsRepository
             {
                 Id = a.Id,
                 Order = a.Order,
+                ApproverId = a.ApproverId,
                 ApproverName = a.ApproverName,
                 ApproverEmail = a.ApproverEmail,
                 Status = (ApprovalStepStatus)a.Status,

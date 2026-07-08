@@ -28,6 +28,11 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ApproverId")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
                     b.Property<string>("ApproverEmail")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -44,6 +49,10 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
 
                     b.Property<int>("Order")
                         .HasColumnType("int");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
 
                     b.Property<string>("Signature")
                         .HasColumnType("nvarchar(max)");

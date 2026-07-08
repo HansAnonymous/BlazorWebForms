@@ -13,7 +13,8 @@ public enum FormFieldKind
     RichText,
     Signature,
     RepeatableList,
-    RankedChoice
+    RankedChoice,
+    Custom
 }
 
 public enum NumberDisplayKind
