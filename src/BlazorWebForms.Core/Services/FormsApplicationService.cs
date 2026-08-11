@@ -109,14 +109,17 @@ public sealed class FormsApplicationService(
         form.Publication.ConfirmationRedirectUrl = request.ConfirmationRedirectUrl;
         form.Publication.RequireCaptcha = request.RequireCaptcha;
         form.Publication.AutoSaveIntervalSeconds = request.AutoSaveIntervalSeconds;
-        if (!string.IsNullOrWhiteSpace(request.AccessPasswordPlainText))
+        if (request.AccessPasswordPlainText is not null)
         {
-            form.Publication.AccessPasswordHash = HashAccessPassword(request.AccessPasswordPlainText);
-        }
-        else if (string.IsNullOrWhiteSpace(request.AccessPasswordPlainText) && request.FormId.HasValue)
-        {
-            // Explicit empty string clears the password
-            form.Publication.AccessPasswordHash = string.Empty;
+            if (!string.IsNullOrWhiteSpace(request.AccessPasswordPlainText))
+            {
+                form.Publication.AccessPasswordHash = HashAccessPassword(request.AccessPasswordPlainText);
+            }
+            else if (request.FormId.HasValue)
+            {
+                // Explicit empty string clears the password
+                form.Publication.AccessPasswordHash = string.Empty;
+            }
         }
         SanitizeAndValidateBranding(request.Definition.Branding);
         ValidateLocalizationPayload(request.Definition);
