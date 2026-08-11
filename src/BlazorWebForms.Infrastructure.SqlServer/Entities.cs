@@ -18,11 +18,23 @@ public class FormEntity
     public int PublicationAccessMode { get; set; }
     public bool PublicationSendSubmissionCopyToSubmitter { get; set; }
     public int PublicationEditMode { get; set; }
+    public DateTimeOffset? PublicationOpenUtc { get; set; }
+    public DateTimeOffset? PublicationCloseUtc { get; set; }
+    public string PublicationNotYetOpenMessage { get; set; } = string.Empty;
+    public string PublicationClosedMessage { get; set; } = string.Empty;
+    public int? PublicationMaxSubmissions { get; set; }
+    public string PublicationCapReachedMessage { get; set; } = string.Empty;
+    public string PublicationConfirmationMessage { get; set; } = string.Empty;
+    public string PublicationConfirmationRedirectUrl { get; set; } = string.Empty;
+    public string PublicationAccessPasswordHash { get; set; } = string.Empty;
+    public bool PublicationRequireCaptcha { get; set; }
+    public int? PublicationAutoSaveIntervalSeconds { get; set; }
     public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     public ICollection<FormVersionEntity> Versions { get; set; } = new List<FormVersionEntity>();
     public ICollection<FormPermissionEntity> Permissions { get; set; } = new List<FormPermissionEntity>();
     public ICollection<FormNotificationEntity> Notifications { get; set; } = new List<FormNotificationEntity>();
+    public ICollection<FormWebhookEntity> Webhooks { get; set; } = new List<FormWebhookEntity>();
 }
 
 public class FormVersionEntity
@@ -68,9 +80,12 @@ public class EntryEntity
     public string SubmittedBy { get; set; } = string.Empty;
     public string SubmittedByEmail { get; set; } = string.Empty;
     public DateTimeOffset SubmittedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? StartedUtc { get; set; }
     public int Status { get; set; }
     public Dictionary<string, string?> Answers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> SearchIndex { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+    public decimal? Score { get; set; }
+    public bool? QuizPassed { get; set; }
     public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     public ICollection<EntryRevisionEntity> Revisions { get; set; } = new List<EntryRevisionEntity>();
@@ -100,10 +115,16 @@ public class ApprovalStepEntity
     public string ApproverId { get; set; } = string.Empty;
     public string ApproverName { get; set; } = string.Empty;
     public string ApproverEmail { get; set; } = string.Empty;
+    public int AcceptorMode { get; set; }
+    public string AcceptorsJson { get; set; } = "[]";
+    public string Instructions { get; set; } = string.Empty;
     public int Status { get; set; }
     public string? Signature { get; set; }
     public string? RejectionReason { get; set; }
     public DateTimeOffset? CompletedUtc { get; set; }
+    public string? DelegatedToEmail { get; set; }
+    public string? DelegatedToName { get; set; }
+    public DateTimeOffset? DelegatedUtc { get; set; }
 }
 
 public class ApprovalAuditEventEntity
@@ -163,4 +184,28 @@ public class FormInvitationEntity
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public Guid? UpdatedByUserId { get; set; }
     public DateTimeOffset? UpdatedUtc { get; set; }
+}
+
+public class FormWebhookEntity
+{
+    public Guid Id { get; set; }
+    public Guid FormId { get; set; }
+    public FormEntity? Form { get; set; }
+    public string Url { get; set; } = string.Empty;
+    public string Secret { get; set; } = string.Empty;
+    public string TriggerEventsJson { get; set; } = "[]";
+    public string HeadersJson { get; set; } = "{}";
+    public bool IsEnabled { get; set; } = true;
+}
+
+public class FormAnalyticsEntity
+{
+    public Guid FormId { get; set; }
+    public FormEntity? Form { get; set; }
+    public long ViewCount { get; set; }
+    public long StartCount { get; set; }
+    public long SubmissionCount { get; set; }
+    public long AbandonCount { get; set; }
+    public double AverageCompletionSeconds { get; set; }
+    public DateTimeOffset? LastUpdatedUtc { get; set; }
 }

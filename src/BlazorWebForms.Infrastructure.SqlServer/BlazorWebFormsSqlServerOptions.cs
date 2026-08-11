@@ -24,7 +24,7 @@ public sealed class BlazorWebFormsSqlServerOptions
     public string DataResidenceRegion { get; set; } = "local-dev";
 
     public string EmailProviderStrategy { get; set; } = "DryRun";
-    public string EmailFromAddress { get; set; } = "noreply@example.com";
+    public string EmailFromAddress { get; set; } = string.Empty;
     public string EmailFromDisplayName { get; set; } = "BlazorWebForms";
 
     public string? SmtpHost { get; set; }

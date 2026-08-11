@@ -4,7 +4,7 @@
 
     <!-- NuGet Package Metadata -->
     <PackageId>BlazorWebForms.Core</PackageId>
-    <Version>1.0.3</Version>
+    <Version>1.1.0</Version>
     <Authors>HansAnonymous</Authors>
     <Company>HansAnonymous</Company>
     <Description>Core library for BlazorWebForms - A library for building Blazor applications with WebForms-like patterns.</Description>

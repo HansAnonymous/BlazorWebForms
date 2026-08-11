@@ -17,7 +17,7 @@ internal static class IsolatedUnitTests
     }
 
     // ───────────────────────────────────────────────
-    //  DefaultPermissionEvaluator – isolated coverage
+    //  DefaultPermissionEvaluator - isolated coverage
     // ───────────────────────────────────────────────
 
     private static void RunPermissionEvaluatorTests()
@@ -154,7 +154,7 @@ internal static class IsolatedUnitTests
     }
 
     // ───────────────────────────────────────────────
-    //  InMemoryCoreMetadataCache – isolated coverage
+    //  InMemoryCoreMetadataCache - isolated coverage
     // ───────────────────────────────────────────────
 
     private static void RunMetadataCacheTests()
@@ -635,18 +635,18 @@ internal static class IsolatedUnitTests
     }
 
     // ───────────────────────────────────────────────
-    //  FormsApplicationService – uncovered methods
+    //  FormsApplicationService - uncovered methods
     // ───────────────────────────────────────────────
 
     private static async Task RunServiceEdgeCaseTests()
     {
         var (app, repository) = BuildServiceWithFakes();
 
-        // GetPublishedFormAsync – nonexistent slug
+        // GetPublishedFormAsync - nonexistent slug
         var missing = await app.GetPublishedFormAsync("no-such-slug");
         Assert(missing is null, "GetPublishedFormAsync returns null for nonexistent slug.");
 
-        // GetPublishedFormAsync – form exists but unpublished
+        // GetPublishedFormAsync - form exists but unpublished
         var unpublished = await app.SaveDraftAsync(new SaveDraftRequest
         {
             Name = "Unpublished form",
@@ -658,19 +658,19 @@ internal static class IsolatedUnitTests
         var unpublishedResult = await app.GetPublishedFormAsync("unpublished-slug");
         Assert(unpublishedResult is null, "GetPublishedFormAsync returns null for unpublished form.");
 
-        // GetPublishedFormAsync – published form returns view model
+        // GetPublishedFormAsync - published form returns view model
         await app.PublishAsync(unpublished.Id);
         var published = await app.GetPublishedFormAsync("unpublished-slug");
         Assert(published is not null && published.Definition.Title == "Travel request",
             "GetPublishedFormAsync returns view model for published form.");
 
-        // GetLatestUserEntryAsync – form not found
+        // GetLatestUserEntryAsync - form not found
         var latestEntryNotFoundBlocked = false;
         try { await app.GetLatestUserEntryAsync(Guid.NewGuid()); }
         catch (InvalidOperationException) { latestEntryNotFoundBlocked = true; }
         Assert(latestEntryNotFoundBlocked, "GetLatestUserEntryAsync throws for nonexistent form.");
 
-        // GetLatestUserEntryAsync – returns latest entry for current user
+        // GetLatestUserEntryAsync - returns latest entry for current user
         var latestForm = await app.SaveDraftAsync(new SaveDraftRequest
         {
             Name = "Latest entry form",
@@ -691,7 +691,7 @@ internal static class IsolatedUnitTests
         var latest = await app.GetLatestUserEntryAsync(latestForm.Id);
         Assert(latest is not null && latest.Id == secondEntry.Id, "GetLatestUserEntryAsync returns latest entry for current user.");
 
-        // GetLatestUserEntryAsync – no entries returns null
+        // GetLatestUserEntryAsync - no entries returns null
         var emptyForm = await app.SaveDraftAsync(new SaveDraftRequest
         {
             Name = "Empty entry form",
@@ -704,19 +704,19 @@ internal static class IsolatedUnitTests
         var noEntry = await app.GetLatestUserEntryAsync(emptyForm.Id);
         Assert(noEntry is null, "GetLatestUserEntryAsync returns null when no entries exist.");
 
-        // CleanupStaleDraftFilesAsync – zero threshold throws
+        // CleanupStaleDraftFilesAsync - zero threshold throws
         var zeroThresholdBlocked = false;
         try { await app.CleanupStaleDraftFilesAsync(TimeSpan.Zero); }
         catch (InvalidOperationException) { zeroThresholdBlocked = true; }
         Assert(zeroThresholdBlocked, "CleanupStaleDraftFilesAsync blocks zero threshold.");
 
-        // CleanupStaleDraftFilesAsync – negative threshold throws
+        // CleanupStaleDraftFilesAsync - negative threshold throws
         var negativeThresholdBlocked = false;
         try { await app.CleanupStaleDraftFilesAsync(TimeSpan.FromDays(-1)); }
         catch (InvalidOperationException) { negativeThresholdBlocked = true; }
         Assert(negativeThresholdBlocked, "CleanupStaleDraftFilesAsync blocks negative threshold.");
 
-        // NormalizeQueryOptions – zero limit uses default page size
+        // NormalizeQueryOptions - zero limit uses default page size
         var defaultPagedResults = await app.QueryEntriesAsync(new EntryQueryOptions
         {
             FormId = latestForm.Id,
@@ -725,7 +725,7 @@ internal static class IsolatedUnitTests
         // zero limit should be replaced with default (100), so it should work fine
         Assert(defaultPagedResults is not null, "QueryEntries normalizes zero limit to default page size.");
 
-        // NormalizeQueryOptions – very large limit is capped
+        // NormalizeQueryOptions - very large limit is capped
         var cappedResults = await app.QueryEntriesAsync(new EntryQueryOptions
         {
             FormId = latestForm.Id,
@@ -733,7 +733,7 @@ internal static class IsolatedUnitTests
         });
         Assert(cappedResults is not null, "QueryEntries normalizes large limit.");
 
-        // NormalizeQueryOptions – negative offset normalized to zero
+        // NormalizeQueryOptions - negative offset normalized to zero
         var negOffsetResults = await app.QueryEntriesAsync(new EntryQueryOptions
         {
             FormId = latestForm.Id,
@@ -742,7 +742,7 @@ internal static class IsolatedUnitTests
         });
         Assert(negOffsetResults is not null, "QueryEntries normalizes negative offset.");
 
-        // ResubmitEntryAsync – non-rejected entry throws
+        // ResubmitEntryAsync - non-rejected entry throws
         var resubmitForm = await app.SaveDraftAsync(new SaveDraftRequest
         {
             Name = "Resubmit test form",
@@ -767,7 +767,7 @@ internal static class IsolatedUnitTests
         catch (InvalidOperationException) { resubmitNonRejectedBlocked = true; }
         Assert(resubmitNonRejectedBlocked, "ResubmitEntryAsync blocks non-rejected entries.");
 
-        // SubmitEntryAsync – form not published throws
+        // SubmitEntryAsync - form not published throws
         var unpubSubmitForm = await app.SaveDraftAsync(new SaveDraftRequest
         {
             Name = "Unpub submit form",
@@ -787,13 +787,13 @@ internal static class IsolatedUnitTests
         catch (InvalidOperationException) { submitUnpubBlocked = true; }
         Assert(submitUnpubBlocked, "SubmitEntryAsync blocks submissions to unpublished forms.");
 
-        // ApproveStepAsync – entry not in review state throws
+        // ApproveStepAsync - entry not in review state throws
         var approveNotInReviewBlocked = false;
         try { await app.ApproveStepAsync(submittedEntry.Id, Guid.NewGuid(), "Sig"); }
         catch (InvalidOperationException) { approveNotInReviewBlocked = true; }
         Assert(approveNotInReviewBlocked, "ApproveStepAsync blocks entry not in NeedsApproval state.");
 
-        // RejectStepAsync – empty reason throws
+        // RejectStepAsync - empty reason throws
         var rejectForm = await app.SaveDraftAsync(new SaveDraftRequest
         {
             Name = "Reject reason test",
@@ -818,13 +818,13 @@ internal static class IsolatedUnitTests
         catch (InvalidOperationException) { whitespaceReasonBlocked = true; }
         Assert(whitespaceReasonBlocked, "RejectStepAsync blocks whitespace-only rejection reason.");
 
-        // ExportEntryPdfAsync – entry not found
+        // ExportEntryPdfAsync - entry not found
         var exportMissingBlocked = false;
         try { await app.ExportEntryPdfAsync(Guid.NewGuid()); }
         catch (InvalidOperationException) { exportMissingBlocked = true; }
         Assert(exportMissingBlocked, "ExportEntryPdfAsync throws for nonexistent entry.");
 
-        // GetEntryDetailAsync – entry not found returns null
+        // GetEntryDetailAsync - entry not found returns null
         var missingDetail = await app.GetEntryDetailAsync(Guid.NewGuid());
         Assert(missingDetail is null, "GetEntryDetailAsync returns null for nonexistent entry.");
 
@@ -853,7 +853,7 @@ internal static class IsolatedUnitTests
         });
         await app.PublishAsync(form.Id);
 
-        // CreateInvitationAsync – blank email
+        // CreateInvitationAsync - blank email
         var blankEmailBlocked = false;
         try
         {
@@ -869,7 +869,7 @@ internal static class IsolatedUnitTests
         catch (InvalidOperationException) { blankEmailBlocked = true; }
         Assert(blankEmailBlocked, "CreateInvitationAsync blocks blank email.");
 
-        // CreateInvitationAsync – whitespace email
+        // CreateInvitationAsync - whitespace email
         var wsEmailBlocked = false;
         try
         {
@@ -885,7 +885,7 @@ internal static class IsolatedUnitTests
         catch (InvalidOperationException) { wsEmailBlocked = true; }
         Assert(wsEmailBlocked, "CreateInvitationAsync blocks whitespace email.");
 
-        // CreateInvitationAsync – ValidFor zero
+        // CreateInvitationAsync - ValidFor zero
         var zeroValidBlocked = false;
         try
         {
@@ -901,7 +901,7 @@ internal static class IsolatedUnitTests
         catch (InvalidOperationException) { zeroValidBlocked = true; }
         Assert(zeroValidBlocked, "CreateInvitationAsync blocks zero ValidFor.");
 
-        // CreateInvitationAsync – ValidFor negative
+        // CreateInvitationAsync - ValidFor negative
         var negativeValidBlocked = false;
         try
         {
@@ -917,7 +917,7 @@ internal static class IsolatedUnitTests
         catch (InvalidOperationException) { negativeValidBlocked = true; }
         Assert(negativeValidBlocked, "CreateInvitationAsync blocks negative ValidFor.");
 
-        // CreateInvitationAsync – ValidFor > 30 days
+        // CreateInvitationAsync - ValidFor > 30 days
         var tooLongValidBlocked = false;
         try
         {
@@ -933,7 +933,7 @@ internal static class IsolatedUnitTests
         catch (InvalidOperationException) { tooLongValidBlocked = true; }
         Assert(tooLongValidBlocked, "CreateInvitationAsync blocks ValidFor > 30 days.");
 
-        // CreateInvitationAsync – form not found
+        // CreateInvitationAsync - form not found
         var missingFormBlocked = false;
         try
         {
@@ -949,19 +949,19 @@ internal static class IsolatedUnitTests
         catch (InvalidOperationException) { missingFormBlocked = true; }
         Assert(missingFormBlocked, "CreateInvitationAsync throws for nonexistent form.");
 
-        // AcceptInvitationAsync – blank token
+        // AcceptInvitationAsync - blank token
         var blankTokenBlocked = false;
         try { await app.AcceptInvitationAsync(""); }
         catch (InvalidOperationException) { blankTokenBlocked = true; }
         Assert(blankTokenBlocked, "AcceptInvitationAsync blocks blank token.");
 
-        // AcceptInvitationAsync – whitespace token
+        // AcceptInvitationAsync - whitespace token
         var wsTokenBlocked = false;
         try { await app.AcceptInvitationAsync("   "); }
         catch (InvalidOperationException) { wsTokenBlocked = true; }
         Assert(wsTokenBlocked, "AcceptInvitationAsync blocks whitespace token.");
 
-        // AcceptInvitationAsync – nonexistent token
+        // AcceptInvitationAsync - nonexistent token
         var badTokenBlocked = false;
         try { await app.AcceptInvitationAsync("nonexistent-token"); }
         catch (InvalidOperationException) { badTokenBlocked = true; }
@@ -999,27 +999,27 @@ internal static class IsolatedUnitTests
         catch (InvalidOperationException) { unauthBlocked = true; }
         Assert(unauthBlocked, "AcceptInvitationAsync blocks unauthenticated user.");
 
-        // RevokeInvitationAsync – nonexistent invitation
+        // RevokeInvitationAsync - nonexistent invitation
         var revokeMissingBlocked = false;
         try { await app.RevokeInvitationAsync(Guid.NewGuid()); }
         catch (InvalidOperationException) { revokeMissingBlocked = true; }
         Assert(revokeMissingBlocked, "RevokeInvitationAsync throws for nonexistent invitation.");
 
-        // SendApprovalRemindersAsync – form not found
+        // SendApprovalRemindersAsync - form not found
         var reminderMissingFormBlocked = false;
         try { await app.SendApprovalRemindersAsync(Guid.NewGuid()); }
         catch (InvalidOperationException) { reminderMissingFormBlocked = true; }
         Assert(reminderMissingFormBlocked, "SendApprovalRemindersAsync throws for nonexistent form.");
 
-        // GetBuilderStateAsync – null formId creates new empty form
+        // GetBuilderStateAsync - null formId creates new empty form
         var newBuilderState = await app.GetBuilderStateAsync(null);
         Assert(newBuilderState is not null && newBuilderState.CanManage, "GetBuilderStateAsync with null creates new empty form.");
 
-        // GetBuilderStateAsync – nonexistent formId creates empty form
+        // GetBuilderStateAsync - nonexistent formId creates empty form
         var missingBuilderState = await app.GetBuilderStateAsync(Guid.NewGuid());
         Assert(missingBuilderState is not null, "GetBuilderStateAsync with nonexistent id returns empty form.");
 
-        // SaveDraftSubmissionAsync – form not found
+        // SaveDraftSubmissionAsync - form not found
         var draftMissingFormBlocked = false;
         try
         {
@@ -1031,7 +1031,7 @@ internal static class IsolatedUnitTests
         catch (InvalidOperationException) { draftMissingFormBlocked = true; }
         Assert(draftMissingFormBlocked, "SaveDraftSubmissionAsync throws for nonexistent form.");
 
-        // GetDraftSubmissionAsync – form not found
+        // GetDraftSubmissionAsync - form not found
         var getDraftMissingFormBlocked = false;
         try { await app.GetDraftSubmissionAsync(Guid.NewGuid()); }
         catch (InvalidOperationException) { getDraftMissingFormBlocked = true; }

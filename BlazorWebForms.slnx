@@ -19,6 +19,7 @@
     <File Path="docs/CORE_MODELS.md" />
     <File Path="docs/DEVELOPER_GUIDE.md" />
     <File Path="docs/QUESTION_TYPES.md" />
+    <File Path="docs/SECURITY_CONFIGURATION.md" />
     <File Path="docs/USING_BlazorWebForms.md" />
   </Folder>
 </Solution>

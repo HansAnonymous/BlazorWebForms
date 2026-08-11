@@ -1,5 +1,7 @@
+using System.Data;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
 using BlazorWebForms.Core.Abstractions;
 using BlazorWebForms.Core.Models;
 
@@ -103,6 +105,15 @@ internal sealed class SimpleConditionEvaluator : IConditionEvaluator
             VisibilityRuleOperator.NotEquals => !hasValue || !string.Equals(normalizedActual, normalizedExpected, StringComparison.OrdinalIgnoreCase),
             VisibilityRuleOperator.Contains => hasValue && normalizedActual.Contains(normalizedExpected, StringComparison.OrdinalIgnoreCase),
             VisibilityRuleOperator.Empty => !hasValue || string.IsNullOrWhiteSpace(normalizedActual),
+            VisibilityRuleOperator.NotEmpty => hasValue && !string.IsNullOrWhiteSpace(normalizedActual),
+            VisibilityRuleOperator.StartsWith => hasValue && normalizedActual.StartsWith(normalizedExpected, StringComparison.OrdinalIgnoreCase),
+            VisibilityRuleOperator.EndsWith => hasValue && normalizedActual.EndsWith(normalizedExpected, StringComparison.OrdinalIgnoreCase),
+            VisibilityRuleOperator.GreaterThan => decimal.TryParse(normalizedActual, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var gtActual) &&
+                                                  decimal.TryParse(normalizedExpected, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var gtExpected) &&
+                                                  gtActual > gtExpected,
+            VisibilityRuleOperator.LessThan => decimal.TryParse(normalizedActual, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var ltActual) &&
+                                               decimal.TryParse(normalizedExpected, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var ltExpected) &&
+                                               ltActual < ltExpected,
             _ => true
         };
     }
@@ -128,9 +139,203 @@ internal sealed class DefaultPermissionEvaluator : IPermissionEvaluator
     public bool CanViewEntry(FormAggregate form, EntryRecord entry, UserProfile user) =>
         IsAdmin(user) ||
         CanManageForm(form, user) ||
-        entry.ApprovalSteps.Any(s => string.Equals(s.ApproverEmail, user.Email, StringComparison.OrdinalIgnoreCase)) ||
+        entry.ApprovalSteps.Any(s => string.Equals(s.ApproverEmail, user.Email, StringComparison.OrdinalIgnoreCase)
+                                  || s.Acceptors.Any(a => string.Equals(a.Email, user.Email, StringComparison.OrdinalIgnoreCase))
+                                  || string.Equals(s.DelegatedToEmail, user.Email, StringComparison.OrdinalIgnoreCase)) ||
         string.Equals(entry.SubmittedByEmail, user.Email, StringComparison.OrdinalIgnoreCase) ||
         form.Permissions.Any(p => p.UserId == user.UserId &&
                                   (p.Role == FormPermissionRole.Viewer || p.Role == FormPermissionRole.SelfViewer) &&
                                   (string.IsNullOrWhiteSpace(p.ScopeType) || p.ScopeType.Equals("Form", StringComparison.OrdinalIgnoreCase) || p.ScopeType.Equals("Global", StringComparison.OrdinalIgnoreCase)));
+}
+
+/// <summary>No-op implementation of <see cref="IWebhookDispatcher"/>. Used when no real dispatcher is registered.</summary>
+internal sealed class NoOpWebhookDispatcher : IWebhookDispatcher
+{
+    public Task DispatchAsync(FormAggregate form, WebhookTriggerEvent triggerEvent, EntryRecord entry, CancellationToken cancellationToken = default) =>
+        Task.CompletedTask;
+}
+
+/// <summary>
+/// Default formula evaluator. Substitutes <c>{fieldId}</c> references with current answer values
+/// then evaluates the resulting arithmetic expression using <see cref="DataTable.Compute"/>.
+/// </summary>
+internal sealed class SimpleFormulaEvaluator : IFormulaEvaluator
+{
+    private static readonly Regex FieldRef = new(@"\{([^}]+)\}", RegexOptions.Compiled);
+
+    public string? Evaluate(string expression, IReadOnlyDictionary<string, string?> answers)
+    {
+        if (string.IsNullOrWhiteSpace(expression))
+        {
+            return null;
+        }
+
+        var substituted = FieldRef.Replace(expression, match =>
+        {
+            var fieldId = match.Groups[1].Value;
+            return answers.TryGetValue(fieldId, out var v) && v is not null ? v : "0";
+        });
+
+        try
+        {
+            var result = new DataTable().Compute(substituted, null);
+            return result?.ToString() ?? null;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+}
+
+/// <summary>Pass-through CAPTCHA validator. Always returns <c>true</c>. Replace via DI with a real provider.</summary>
+internal sealed class NoOpCaptchaValidator : ICaptchaValidator
+{
+    public Task<bool> ValidateAsync(string token, CancellationToken cancellationToken = default) =>
+        Task.FromResult(true);
+}
+
+/// <summary>No-op analytics store. All tracking calls are silent no-ops.</summary>
+internal sealed class NoOpFormAnalyticsStore : IFormAnalyticsStore
+{
+    public Task TrackViewAsync(Guid formId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task TrackStartAsync(Guid formId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task TrackSubmissionAsync(Guid formId, TimeSpan? completionTime, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task TrackAbandonAsync(Guid formId, CancellationToken cancellationToken = default) => Task.CompletedTask;
+    public Task<FormAnalyticsSummary> GetSummaryAsync(Guid formId, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new FormAnalyticsSummary { FormId = formId });
+}
+
+/// <summary>
+/// Resolves response-piping placeholders (<c>{fieldId}</c>) in field labels, placeholder text,
+/// and help text so that previously entered answer values are interpolated at render time.
+/// </summary>
+public static class ResponsePipeHelper
+{
+    private static readonly Regex FieldRef = new(@"\{([^}]+)\}", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Replaces every <c>{fieldId}</c> token in <paramref name="template"/> with the corresponding
+    /// value from <paramref name="answers"/>. Unknown field IDs are left as-is.
+    /// </summary>
+    public static string Pipe(string template, IReadOnlyDictionary<string, string?> answers)
+    {
+        if (string.IsNullOrEmpty(template))
+        {
+            return template;
+        }
+
+        return FieldRef.Replace(template, match =>
+        {
+            var fieldId = match.Groups[1].Value;
+            return answers.TryGetValue(fieldId, out var v) && v is not null ? v : match.Value;
+        });
+    }
+
+    /// <summary>
+    /// Applies response piping to all user-visible text properties of every field in
+    /// <paramref name="definition"/> and returns a new definition copy with piped strings.
+    /// The original definition is not mutated.
+    /// </summary>
+    public static FormDefinition ApplyPiping(FormDefinition definition, IReadOnlyDictionary<string, string?> answers)
+    {
+        // Shallow-clone sections and fields so callers get a render-time copy without mutating the cached definition.
+        var piped = new FormDefinition
+        {
+            SchemaVersion = definition.SchemaVersion,
+            Title = Pipe(definition.Title, answers),
+            Description = Pipe(definition.Description, answers),
+            DefaultCulture = definition.DefaultCulture,
+            Branding = definition.Branding,
+            LocalizedTitles = definition.LocalizedTitles,
+            LocalizedDescriptions = definition.LocalizedDescriptions,
+            Metadata = definition.Metadata,
+            ApprovalWorkflow = definition.ApprovalWorkflow,
+            PaginationMode = definition.PaginationMode,
+            ShowProgressBar = definition.ShowProgressBar,
+            IsQuizMode = definition.IsQuizMode,
+            QuizScoringMode = definition.QuizScoringMode,
+            PassScore = definition.PassScore,
+            ShowScoreOnCompletion = definition.ShowScoreOnCompletion
+        };
+
+        foreach (var section in definition.Sections)
+        {
+            var pipedSection = new FormSectionDefinition
+            {
+                Id = section.Id,
+                Title = Pipe(section.Title, answers),
+                Description = Pipe(section.Description, answers),
+                VisibilityCondition = section.VisibilityCondition,
+                VisibilityRules = section.VisibilityRules,
+                Layout = section.Layout,
+                LocalizedTitles = section.LocalizedTitles,
+                LocalizedDescriptions = section.LocalizedDescriptions,
+                Metadata = section.Metadata,
+                Branches = section.Branches
+            };
+
+            foreach (var field in section.Fields)
+            {
+                pipedSection.Fields.Add(new FormFieldDefinition
+                {
+                    Id = field.Id,
+                    Kind = field.Kind,
+                    Label = Pipe(field.Label, answers),
+                    Placeholder = Pipe(field.Placeholder, answers),
+                    HelpText = Pipe(field.HelpText, answers),
+                    Required = field.Required,
+                    Searchable = field.Searchable,
+                    ReadOnly = field.ReadOnly,
+                    RegexPattern = field.RegexPattern,
+                    DefaultValue = field.DefaultValue,
+                    ValidationHint = field.ValidationHint,
+                    Prefill = field.Prefill,
+                    VisibilityCondition = field.VisibilityCondition,
+                    VisibilityRules = field.VisibilityRules,
+                    Layout = field.Layout,
+                    RepeatableItemLabel = field.RepeatableItemLabel,
+                    RepeatableAddButtonText = field.RepeatableAddButtonText,
+                    MinItems = field.MinItems,
+                    MaxItems = field.MaxItems,
+                    RepeatableColumns = field.RepeatableColumns,
+                    NumberDisplayKind = field.NumberDisplayKind,
+                    NumberUnit = field.NumberUnit,
+                    MinValue = field.MinValue,
+                    MaxValue = field.MaxValue,
+                    NumberStep = field.NumberStep,
+                    RankCount = field.RankCount,
+                    LocalizedLabels = field.LocalizedLabels,
+                    LocalizedPlaceholders = field.LocalizedPlaceholders,
+                    LocalizedHelpTexts = field.LocalizedHelpTexts,
+                    LocalizedValidationHints = field.LocalizedValidationHints,
+                    MaxFileSizeBytes = field.MaxFileSizeBytes,
+                    MaxFileCount = field.MaxFileCount,
+                    AllowedMimeTypes = field.AllowedMimeTypes,
+                    AllowedExtensions = field.AllowedExtensions,
+                    Options = field.Options,
+                    CustomKind = field.CustomKind,
+                    Metadata = field.Metadata,
+                    MaxLength = field.MaxLength,
+                    MinLength = field.MinLength,
+                    MaxWords = field.MaxWords,
+                    MinWords = field.MinWords,
+                    FormulaExpression = field.FormulaExpression,
+                    LookupSourceUrl = field.LookupSourceUrl,
+                    LookupValuePath = field.LookupValuePath,
+                    LookupLabelPath = field.LookupLabelPath,
+                    LookupMinChars = field.LookupMinChars,
+                    LookupMaxResults = field.LookupMaxResults,
+                    LookupDebounceMs = field.LookupDebounceMs,
+                    LookupDisplay = field.LookupDisplay,
+                    ScoreWeight = field.ScoreWeight,
+                    CorrectAnswer = field.CorrectAnswer
+                });
+            }
+
+            piped.Sections.Add(pipedSection);
+        }
+
+        return piped;
+    }
 }

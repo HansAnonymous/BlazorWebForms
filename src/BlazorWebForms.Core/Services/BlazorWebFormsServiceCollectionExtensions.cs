@@ -9,6 +9,7 @@ public static class BlazorWebFormsServiceCollectionExtensions
 {
     public static IServiceCollection AddBlazorWebFormsCore(this IServiceCollection services)
     {
+        services.AddLogging();
         services.AddSingleton<IFormDefinitionSerializer, JsonFormDefinitionSerializer>();
         services.AddSingleton<IConditionEvaluator, SimpleConditionEvaluator>();
         services.AddSingleton<IPermissionEvaluator, DefaultPermissionEvaluator>();
@@ -19,6 +20,10 @@ public static class BlazorWebFormsServiceCollectionExtensions
         services.TryAddEnumerable(ServiceDescriptor.Singleton<IFormPrefillProvider, FixedValueFormPrefillProvider>());
         services.TryAddSingleton<IAntiAbuseGuard, NoOpAntiAbuseGuard>();
         services.TryAddSingleton<IOperationalTelemetry, NoOpOperationalTelemetry>();
+        services.TryAddSingleton<IWebhookDispatcher, NoOpWebhookDispatcher>();
+        services.TryAddSingleton<IFormulaEvaluator, SimpleFormulaEvaluator>();
+        services.TryAddSingleton<ICaptchaValidator, NoOpCaptchaValidator>();
+        services.TryAddSingleton<IFormAnalyticsStore, NoOpFormAnalyticsStore>();
         services.AddScoped<FormsApplicationService>();
         return services;
     }

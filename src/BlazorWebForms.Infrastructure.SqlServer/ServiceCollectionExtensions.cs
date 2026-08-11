@@ -3,6 +3,7 @@ using BlazorWebForms.Infrastructure.SqlServer.Integrations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 
 namespace BlazorWebForms.Infrastructure.SqlServer;
 
@@ -15,11 +16,21 @@ public static class ServiceCollectionExtensions
         var options = new BlazorWebFormsSqlServerOptions();
         configure?.Invoke(options);
 
+        var validator = new BlazorWebFormsSqlServerOptionsValidator();
+        var validationResult = validator.Validate(Options.DefaultName, options);
+        if (validationResult.Failed)
+        {
+            throw new OptionsValidationException(nameof(BlazorWebFormsSqlServerOptions), typeof(BlazorWebFormsSqlServerOptions), validationResult.Failures);
+        }
+
+        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<BlazorWebFormsSqlServerOptions>, BlazorWebFormsSqlServerOptionsValidator>());
         services.AddSingleton(options);
         services.AddHttpClient("BlazorWebForms.Email.SendGrid");
         services.AddHttpClient("BlazorWebForms.Email.Graph");
         // register EF Core DbContext and EF-backed repository (scoped)
-        services.AddDbContext<BlazorWebFormsDbContext>(builder => builder.UseSqlServer(options.ConnectionString));
+        services.AddDbContext<BlazorWebFormsDbContext>(builder =>
+            builder.UseSqlServer(options.ConnectionString, sqlOptions =>
+                sqlOptions.EnableRetryOnFailure(maxRetryCount: 5, maxRetryDelay: TimeSpan.FromSeconds(5), errorNumbersToAdd: null)));
         services.AddScoped<IFormsRepository, EfFormsRepository>();
 
         services.TryAddSingleton<IFileStorage, LocalFileStorage>();

@@ -50,8 +50,14 @@ public static class ApprovalStepGuard
         var user = currentUserContext.GetCurrentUser();
         var form = await repository.GetFormAsync(entry.FormId, cancellationToken)
                    ?? throw new InvalidOperationException("Form not found.");
-        var isApprover = string.Equals(step.ApproverEmail, user.Email, StringComparison.OrdinalIgnoreCase);
-        if (!(permissionEvaluator.CanManageForm(form, user) || isApprover || user.Roles.Contains(FormPermissionRole.Admin)))
+
+        var isDesignatedApprover = string.Equals(step.ApproverEmail, user.Email, StringComparison.OrdinalIgnoreCase);
+        var isDelegatedApprover = !string.IsNullOrWhiteSpace(step.DelegatedToEmail) &&
+                                  string.Equals(step.DelegatedToEmail, user.Email, StringComparison.OrdinalIgnoreCase);
+        var isAcceptor = step.AcceptorMode == ApprovalStepAcceptorMode.AnyOf &&
+                         step.Acceptors.Any(a => string.Equals(a.Email, user.Email, StringComparison.OrdinalIgnoreCase));
+
+        if (!(permissionEvaluator.CanManageForm(form, user) || isDesignatedApprover || isDelegatedApprover || isAcceptor || user.Roles.Contains(FormPermissionRole.Admin)))
         {
             throw new InvalidOperationException("Current user cannot act on this approval step.");
         }
