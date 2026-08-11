@@ -1813,7 +1813,7 @@ public sealed class FormsApplicationService(
     private const int PasswordSaltSize = 16;
     private const int PasswordHashSize = 32;
     private const int PasswordIterations = 200_000;
-    private const HashAlgorithmName PasswordHashAlgorithm = HashAlgorithmName.SHA256;
+    private static readonly HashAlgorithmName PasswordHashAlgorithm = HashAlgorithmName.SHA256;
 
     // Stored format: "v1:<base64-salt>:<base64-hash>"
     private static string HashAccessPassword(string plainText)
