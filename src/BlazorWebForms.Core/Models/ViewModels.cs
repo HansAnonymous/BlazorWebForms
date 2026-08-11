@@ -54,7 +54,7 @@ public sealed class SaveDraftRequest
     public string CapReachedMessage { get; set; } = string.Empty;
     public string ConfirmationMessage { get; set; } = string.Empty;
     public string ConfirmationRedirectUrl { get; set; } = string.Empty;
-    public string AccessPasswordPlainText { get; set; } = string.Empty;
+    public string? AccessPasswordPlainText { get; set; }
     public bool RequireCaptcha { get; set; }
     public int? AutoSaveIntervalSeconds { get; set; }
 }
