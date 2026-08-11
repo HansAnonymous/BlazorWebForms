@@ -23,6 +23,17 @@ public sealed class SqlServerSchemaDescriptor(BlazorWebFormsSqlServerOptions opt
             [PublicationAccessMode] INT NOT NULL,
             [PublicationSendSubmissionCopyToSubmitter] BIT NOT NULL,
             [PublicationEditMode] INT NOT NULL CONSTRAINT [DF_Forms_PublicationEditMode] DEFAULT(0),
+            [PublicationOpenUtc] DATETIMEOFFSET NULL,
+            [PublicationCloseUtc] DATETIMEOFFSET NULL,
+            [PublicationNotYetOpenMessage] NVARCHAR(2000) NOT NULL CONSTRAINT [DF_Forms_PublicationNotYetOpenMessage] DEFAULT(N''),
+            [PublicationClosedMessage] NVARCHAR(2000) NOT NULL CONSTRAINT [DF_Forms_PublicationClosedMessage] DEFAULT(N''),
+            [PublicationMaxSubmissions] INT NULL,
+            [PublicationCapReachedMessage] NVARCHAR(2000) NOT NULL CONSTRAINT [DF_Forms_PublicationCapReachedMessage] DEFAULT(N''),
+            [PublicationConfirmationMessage] NVARCHAR(4000) NOT NULL CONSTRAINT [DF_Forms_PublicationConfirmationMessage] DEFAULT(N''),
+            [PublicationConfirmationRedirectUrl] NVARCHAR(2048) NOT NULL CONSTRAINT [DF_Forms_PublicationConfirmationRedirectUrl] DEFAULT(N''),
+            [PublicationAccessPasswordHash] NVARCHAR(256) NOT NULL CONSTRAINT [DF_Forms_PublicationAccessPasswordHash] DEFAULT(N''),
+            [PublicationRequireCaptcha] BIT NOT NULL CONSTRAINT [DF_Forms_PublicationRequireCaptcha] DEFAULT(0),
+            [PublicationAutoSaveIntervalSeconds] INT NULL,
             [RowVersion] ROWVERSION NOT NULL
         );
 
@@ -42,9 +53,12 @@ public sealed class SqlServerSchemaDescriptor(BlazorWebFormsSqlServerOptions opt
             [SubmittedBy] NVARCHAR(256) NOT NULL,
             [SubmittedByEmail] NVARCHAR(256) NOT NULL,
             [SubmittedUtc] DATETIMEOFFSET NOT NULL,
+            [StartedUtc] DATETIMEOFFSET NULL,
             [Status] INT NOT NULL,
             [Answers] NVARCHAR(MAX) NOT NULL,
             [SearchIndex] NVARCHAR(MAX) NOT NULL,
+            [Score] DECIMAL(18,2) NULL,
+            [QuizPassed] BIT NULL,
             [RowVersion] ROWVERSION NOT NULL,
             CONSTRAINT [FK_Entries_Forms_FormId] FOREIGN KEY ([FormId]) REFERENCES [{options.SchemaName}].[Forms]([Id]) ON DELETE CASCADE
         );
@@ -63,12 +77,19 @@ public sealed class SqlServerSchemaDescriptor(BlazorWebFormsSqlServerOptions opt
             [Id] UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
             [EntryId] UNIQUEIDENTIFIER NOT NULL,
             [Order] INT NOT NULL,
+            [ApproverId] NVARCHAR(256) NOT NULL,
             [ApproverName] NVARCHAR(MAX) NOT NULL,
             [ApproverEmail] NVARCHAR(MAX) NOT NULL,
+            [AcceptorMode] INT NOT NULL CONSTRAINT [DF_ApprovalSteps_AcceptorMode] DEFAULT(0),
+            [AcceptorsJson] NVARCHAR(MAX) NOT NULL CONSTRAINT [DF_ApprovalSteps_AcceptorsJson] DEFAULT(N'[]'),
+            [Instructions] NVARCHAR(4000) NOT NULL CONSTRAINT [DF_ApprovalSteps_Instructions] DEFAULT(N''),
             [Status] INT NOT NULL,
             [Signature] NVARCHAR(MAX) NULL,
             [RejectionReason] NVARCHAR(2000) NULL,
             [CompletedUtc] DATETIMEOFFSET NULL,
+            [DelegatedToEmail] NVARCHAR(256) NULL,
+            [DelegatedToName] NVARCHAR(256) NULL,
+            [DelegatedUtc] DATETIMEOFFSET NULL,
             CONSTRAINT [FK_ApprovalSteps_Entries_EntryId] FOREIGN KEY ([EntryId]) REFERENCES [{options.SchemaName}].[Entries]([Id]) ON DELETE CASCADE
         );
 
@@ -149,6 +170,28 @@ public sealed class SqlServerSchemaDescriptor(BlazorWebFormsSqlServerOptions opt
             CONSTRAINT [FK_FormInvitations_Forms_FormId] FOREIGN KEY ([FormId]) REFERENCES [{options.SchemaName}].[Forms]([Id]) ON DELETE CASCADE
         );
 
+        CREATE TABLE [{options.SchemaName}].[FormWebhooks] (
+            [Id] UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+            [FormId] UNIQUEIDENTIFIER NOT NULL,
+            [Url] NVARCHAR(2048) NOT NULL,
+            [Secret] NVARCHAR(256) NOT NULL CONSTRAINT [DF_FormWebhooks_Secret] DEFAULT(N''),
+            [TriggerEventsJson] NVARCHAR(MAX) NOT NULL CONSTRAINT [DF_FormWebhooks_TriggerEventsJson] DEFAULT(N'[]'),
+            [HeadersJson] NVARCHAR(MAX) NOT NULL CONSTRAINT [DF_FormWebhooks_HeadersJson] DEFAULT(NCHAR(123) + NCHAR(125)),
+            [IsEnabled] BIT NOT NULL CONSTRAINT [DF_FormWebhooks_IsEnabled] DEFAULT(1),
+            CONSTRAINT [FK_FormWebhooks_Forms_FormId] FOREIGN KEY ([FormId]) REFERENCES [{options.SchemaName}].[Forms]([Id]) ON DELETE CASCADE
+        );
+
+        CREATE TABLE [{options.SchemaName}].[FormAnalytics] (
+            [FormId] UNIQUEIDENTIFIER NOT NULL PRIMARY KEY,
+            [ViewCount] BIGINT NOT NULL CONSTRAINT [DF_FormAnalytics_ViewCount] DEFAULT(0),
+            [StartCount] BIGINT NOT NULL CONSTRAINT [DF_FormAnalytics_StartCount] DEFAULT(0),
+            [SubmissionCount] BIGINT NOT NULL CONSTRAINT [DF_FormAnalytics_SubmissionCount] DEFAULT(0),
+            [AbandonCount] BIGINT NOT NULL CONSTRAINT [DF_FormAnalytics_AbandonCount] DEFAULT(0),
+            [AverageCompletionSeconds] FLOAT NOT NULL CONSTRAINT [DF_FormAnalytics_AverageCompletionSeconds] DEFAULT(0),
+            [LastUpdatedUtc] DATETIMEOFFSET NULL,
+            CONSTRAINT [FK_FormAnalytics_Forms_FormId] FOREIGN KEY ([FormId]) REFERENCES [{options.SchemaName}].[Forms]([Id]) ON DELETE CASCADE
+        );
+
         CREATE UNIQUE INDEX [IX_Forms_Key] ON [{options.SchemaName}].[Forms] ([Key]);
         CREATE UNIQUE INDEX [IX_Forms_PublicationSlug] ON [{options.SchemaName}].[Forms] ([PublicationSlug]);
         CREATE INDEX [IX_Forms_UpdatedUtc] ON [{options.SchemaName}].[Forms] ([UpdatedUtc]);
@@ -186,5 +229,6 @@ public sealed class SqlServerSchemaDescriptor(BlazorWebFormsSqlServerOptions opt
 
         CREATE UNIQUE INDEX [IX_FormInvitations_Token] ON [{options.SchemaName}].[FormInvitations] ([Token]);
         CREATE INDEX [IX_FormInvitations_FormId_Email_Status] ON [{options.SchemaName}].[FormInvitations] ([FormId], [Email], [Status]);
+        CREATE INDEX [IX_FormWebhooks_FormId_IsEnabled] ON [{options.SchemaName}].[FormWebhooks] ([FormId], [IsEnabled]);
         """;
 }

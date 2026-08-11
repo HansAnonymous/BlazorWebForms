@@ -6,6 +6,8 @@ namespace BlazorWebForms.Core.Services;
 
 internal sealed class InMemoryCoreMetadataCache : ICoreMetadataCache
 {
+    private const int MaxPublishedEntries = 256;
+    private const int MaxDashboardEntries = 512;
     private readonly ConcurrentDictionary<string, (PublishedFormViewModel Value, DateTimeOffset ExpiresUtc)> publishedBySlug = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<Guid, (DashboardViewModel Value, DateTimeOffset ExpiresUtc)> dashboardByUser = new();
     private static readonly TimeSpan PublishedTtl = TimeSpan.FromSeconds(30);
@@ -31,7 +33,9 @@ internal sealed class InMemoryCoreMetadataCache : ICoreMetadataCache
 
     public void SetPublishedForm(string slug, PublishedFormViewModel viewModel)
     {
-        publishedBySlug[slug] = (viewModel, DateTimeOffset.UtcNow.Add(PublishedTtl));
+        var now = DateTimeOffset.UtcNow;
+        publishedBySlug[slug] = (viewModel, now.Add(PublishedTtl));
+        PruneCache(publishedBySlug, now, MaxPublishedEntries);
     }
 
     public bool TryGetDashboard(Guid userId, out DashboardViewModel dashboard)
@@ -54,12 +58,44 @@ internal sealed class InMemoryCoreMetadataCache : ICoreMetadataCache
 
     public void SetDashboard(Guid userId, DashboardViewModel dashboard)
     {
-        dashboardByUser[userId] = (dashboard, DateTimeOffset.UtcNow.Add(DashboardTtl));
+        var now = DateTimeOffset.UtcNow;
+        dashboardByUser[userId] = (dashboard, now.Add(DashboardTtl));
+        PruneCache(dashboardByUser, now, MaxDashboardEntries);
     }
 
     public void InvalidateForms()
     {
         publishedBySlug.Clear();
         dashboardByUser.Clear();
+    }
+
+    private static void PruneCache<TKey, TValue>(
+        ConcurrentDictionary<TKey, (TValue Value, DateTimeOffset ExpiresUtc)> cache,
+        DateTimeOffset now,
+        int maxEntries)
+        where TKey : notnull
+    {
+        foreach (var pair in cache)
+        {
+            if (pair.Value.ExpiresUtc < now)
+            {
+                cache.TryRemove(pair.Key, out _);
+            }
+        }
+
+        var overflow = cache.Count - maxEntries;
+        if (overflow <= 0)
+        {
+            return;
+        }
+
+        foreach (var key in cache
+                     .OrderBy(item => item.Value.ExpiresUtc)
+                     .Take(overflow)
+                     .Select(item => item.Key)
+                     .ToList())
+        {
+            cache.TryRemove(key, out _);
+        }
     }
 }

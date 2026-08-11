@@ -1,7 +1,9 @@
+using System.Text.Json;
 using BlazorWebForms.Core.Abstractions;
 using BlazorWebForms.Core.Models;
 using BlazorWebForms.Core.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace BlazorWebForms.Infrastructure.SqlServer;
 
@@ -9,11 +11,13 @@ internal sealed class EfFormsRepository : IFormsRepository
 {
     private readonly BlazorWebFormsDbContext db;
     private readonly IFormDefinitionSerializer serializer;
+    private readonly ILogger<EfFormsRepository> logger;
 
-    public EfFormsRepository(BlazorWebFormsDbContext db, IFormDefinitionSerializer serializer)
+    public EfFormsRepository(BlazorWebFormsDbContext db, IFormDefinitionSerializer serializer, ILogger<EfFormsRepository> logger)
     {
         this.db = db;
         this.serializer = serializer;
+        this.logger = logger;
     }
 
     public async Task SeedAsync(CancellationToken cancellationToken = default)
@@ -43,6 +47,7 @@ internal sealed class EfFormsRepository : IFormsRepository
         catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
         {
             // Probe query can fail when database/table doesn't exist yet — this is expected on first run.
+            logger.LogDebug(ex, "Database probe failed during seed. Falling back to migration path.");
             requiresMigration = true;
         }
 
@@ -54,6 +59,7 @@ internal sealed class EfFormsRepository : IFormsRepository
             }
             catch (InvalidOperationException ex) when (ex.Message.Contains("PendingModelChangesWarning", StringComparison.Ordinal))
             {
+                logger.LogWarning(ex, "Pending model changes detected during migration. Falling back to EnsureCreated.");
                 await db.Database.EnsureCreatedAsync(cancellationToken);
             }
         }
@@ -71,9 +77,11 @@ internal sealed class EfFormsRepository : IFormsRepository
                     var seedEntry = DemoEntrySeedHelper.CreateDemoEntry(existingForm.Id, existingForm.Versions.First().Id);
                     db.Entries.Add(seedEntry);
                     await db.SaveChangesAsync(cancellationToken);
+                    logger.LogInformation("Seeded demo entry for existing form {FormId}.", existingForm.Id);
                 }
             }
 
+            logger.LogInformation("Seed completed with existing forms present.");
             return;
         }
 
@@ -180,6 +188,7 @@ internal sealed class EfFormsRepository : IFormsRepository
         var entry = DemoEntrySeedHelper.CreateDemoEntry(entity.Id, entity.Versions.First().Id);
         db.Entries.Add(entry);
         await db.SaveChangesAsync(cancellationToken);
+        logger.LogInformation("Seeded default form and demo entry for new database.");
     }
 
     private Task EnsureLegacySchemaCompatibilityAsync(CancellationToken cancellationToken)
@@ -415,10 +424,18 @@ internal sealed class EfFormsRepository : IFormsRepository
             .Include(f => f.Versions)
             .Include(f => f.Permissions)
             .Include(f => f.Notifications)
+            .Include(f => f.Webhooks)
+            .AsSplitQuery()
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
-        return entities.Select(ToAggregate).ToList();
+        var results = new List<FormAggregate>(entities.Count);
+        foreach (var entity in entities)
+        {
+            results.Add(ToAggregate(entity));
+        }
+
+        return results;
     }
 
     public async Task<FormAggregate?> GetFormAsync(Guid formId, CancellationToken cancellationToken = default)
@@ -427,6 +444,8 @@ internal sealed class EfFormsRepository : IFormsRepository
             .Include(f => f.Versions)
             .Include(f => f.Permissions)
             .Include(f => f.Notifications)
+            .Include(f => f.Webhooks)
+            .AsSplitQuery()
             .AsNoTracking()
             .FirstOrDefaultAsync(f => f.Id == formId, cancellationToken);
         return entity is null ? null : ToAggregate(entity);
@@ -438,6 +457,8 @@ internal sealed class EfFormsRepository : IFormsRepository
             .Include(f => f.Versions)
             .Include(f => f.Permissions)
             .Include(f => f.Notifications)
+            .Include(f => f.Webhooks)
+            .AsSplitQuery()
             .AsNoTracking()
             .FirstOrDefaultAsync(f => f.PublicationSlug == slug, cancellationToken);
         return entity is null ? null : ToAggregate(entity);
@@ -452,6 +473,7 @@ internal sealed class EfFormsRepository : IFormsRepository
             .Include(f => f.Versions)
             .Include(f => f.Permissions)
             .Include(f => f.Notifications)
+            .Include(f => f.Webhooks)
             .FirstOrDefaultAsync(f => f.Id == form.Id, cancellationToken);
 
         if (existing is null)
@@ -471,6 +493,17 @@ internal sealed class EfFormsRepository : IFormsRepository
         existing.PublicationAccessMode = (int)form.Publication.AccessMode;
         existing.PublicationSendSubmissionCopyToSubmitter = form.Publication.SendSubmissionCopyToSubmitter;
         existing.PublicationEditMode = (int)form.Publication.EditMode;
+        existing.PublicationOpenUtc = form.Publication.OpenUtc;
+        existing.PublicationCloseUtc = form.Publication.CloseUtc;
+        existing.PublicationNotYetOpenMessage = form.Publication.NotYetOpenMessage;
+        existing.PublicationClosedMessage = form.Publication.ClosedMessage;
+        existing.PublicationMaxSubmissions = form.Publication.MaxSubmissions;
+        existing.PublicationCapReachedMessage = form.Publication.CapReachedMessage;
+        existing.PublicationConfirmationMessage = form.Publication.ConfirmationMessage;
+        existing.PublicationConfirmationRedirectUrl = form.Publication.ConfirmationRedirectUrl;
+        existing.PublicationAccessPasswordHash = form.Publication.AccessPasswordHash;
+        existing.PublicationRequireCaptcha = form.Publication.RequireCaptcha;
+        existing.PublicationAutoSaveIntervalSeconds = form.Publication.AutoSaveIntervalSeconds;
 
         // Form versions are immutable snapshots; append new ones only.
         var existingVersionIds = existing.Versions.Select(v => v.Id).ToHashSet();
@@ -565,13 +598,56 @@ internal sealed class EfFormsRepository : IFormsRepository
             match.OnApproval = desired.OnApproval;
         }
 
+        var desiredWebhooksById = form.Webhooks.Where(w => !string.IsNullOrWhiteSpace(w.Url)).ToDictionary(w => w.Id);
+        foreach (var existingWebhook in existing.Webhooks.ToList())
+        {
+            if (!desiredWebhooksById.ContainsKey(existingWebhook.Id))
+            {
+                db.FormWebhooks.Remove(existingWebhook);
+            }
+        }
+
+        foreach (var desired in desiredWebhooksById.Values)
+        {
+            var match = existing.Webhooks.FirstOrDefault(w => w.Id == desired.Id);
+            var triggerEventsJson = JsonSerializer.Serialize(desired.TriggerEvents);
+            var headersJson = JsonSerializer.Serialize(desired.Headers);
+
+            if (match is null)
+            {
+                existing.Webhooks.Add(new FormWebhookEntity
+                {
+                    Id = desired.Id,
+                    FormId = existing.Id,
+                    Url = desired.Url,
+                    Secret = desired.Secret,
+                    TriggerEventsJson = triggerEventsJson,
+                    HeadersJson = headersJson,
+                    IsEnabled = desired.IsEnabled
+                });
+                continue;
+            }
+
+            match.Url = desired.Url;
+            match.Secret = desired.Secret;
+            match.TriggerEventsJson = triggerEventsJson;
+            match.HeadersJson = headersJson;
+            match.IsEnabled = desired.IsEnabled;
+        }
+
         try
         {
             await db.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateConcurrencyException ex)
         {
+            logger.LogWarning(ex, "Concurrency conflict while saving form {FormId}.", form.Id);
             throw new InvalidOperationException("The form was updated by another user. Reload and retry.", ex);
+        }
+        catch (DbUpdateException ex)
+        {
+            logger.LogError(ex, "Database update failed while saving form {FormId}.", form.Id);
+            throw new InvalidOperationException("The form could not be saved due to a database update failure.", ex);
         }
 
         await transaction.CommitAsync(cancellationToken);
@@ -593,6 +669,7 @@ internal sealed class EfFormsRepository : IFormsRepository
             .Include(e => e.ApprovalSteps)
             .Include(e => e.Files)
             .Include(e => e.SearchIndexEntries)
+            .AsSplitQuery()
             .AsNoTracking();
 
         if (options.FormId.HasValue)
@@ -600,6 +677,12 @@ internal sealed class EfFormsRepository : IFormsRepository
 
         if (options.Status.HasValue)
             q = q.Where(e => e.Status == (int)options.Status.Value);
+
+        if (options.Statuses is { Count: > 0 })
+        {
+            var intStatuses = options.Statuses.Select(s => (int)s).ToList();
+            q = q.Where(e => intStatuses.Contains(e.Status));
+        }
 
         if (options.SubmittedFromUtc.HasValue)
             q = q.Where(e => e.SubmittedUtc >= options.SubmittedFromUtc.Value);
@@ -635,8 +718,13 @@ internal sealed class EfFormsRepository : IFormsRepository
         }
 
         var list = await q.ToListAsync(cancellationToken);
+        var records = new List<EntryRecord>(list.Count);
+        foreach (var entity in list)
+        {
+            records.Add(ToEntryRecord(entity));
+        }
 
-        return list.Select(ToEntryRecord).ToList();
+        return records;
     }
 
     public async Task<EntryRecord?> GetEntryAsync(Guid entryId, CancellationToken cancellationToken = default)
@@ -694,9 +782,12 @@ internal sealed class EfFormsRepository : IFormsRepository
         existing.SubmittedBy = entry.SubmittedBy;
         existing.SubmittedByEmail = entry.SubmittedByEmail;
         existing.SubmittedUtc = entry.SubmittedUtc;
+        existing.StartedUtc = entry.StartedUtc;
         existing.Status = (int)entry.Status;
         existing.Answers = new Dictionary<string, string?>(entry.Answers, StringComparer.OrdinalIgnoreCase);
         existing.SearchIndex = new Dictionary<string, string>(entry.SearchIndex, StringComparer.OrdinalIgnoreCase);
+        existing.Score = entry.Score;
+        existing.QuizPassed = entry.QuizPassed;
 
         var existingRevisionIds = existing.Revisions.Select(r => r.Id).ToHashSet();
         foreach (var r in entry.Revisions)
@@ -729,10 +820,16 @@ internal sealed class EfFormsRepository : IFormsRepository
                     ApproverId = a.ApproverId,
                     ApproverName = a.ApproverName,
                     ApproverEmail = a.ApproverEmail,
+                    AcceptorMode = (int)a.AcceptorMode,
+                    AcceptorsJson = JsonSerializer.Serialize(a.Acceptors),
+                    Instructions = a.Instructions,
                     Status = (int)a.Status,
                     Signature = a.Signature,
                     RejectionReason = a.RejectionReason,
-                    CompletedUtc = a.CompletedUtc
+                    CompletedUtc = a.CompletedUtc,
+                    DelegatedToEmail = a.DelegatedToEmail,
+                    DelegatedToName = a.DelegatedToName,
+                    DelegatedUtc = a.DelegatedUtc
                 });
                 continue;
             }
@@ -741,10 +838,16 @@ internal sealed class EfFormsRepository : IFormsRepository
             existingStep.ApproverId = a.ApproverId;
             existingStep.ApproverName = a.ApproverName;
             existingStep.ApproverEmail = a.ApproverEmail;
+            existingStep.AcceptorMode = (int)a.AcceptorMode;
+            existingStep.AcceptorsJson = JsonSerializer.Serialize(a.Acceptors);
+            existingStep.Instructions = a.Instructions;
             existingStep.Status = (int)a.Status;
             existingStep.Signature = a.Signature;
             existingStep.RejectionReason = a.RejectionReason;
             existingStep.CompletedUtc = a.CompletedUtc;
+            existingStep.DelegatedToEmail = a.DelegatedToEmail;
+            existingStep.DelegatedToName = a.DelegatedToName;
+            existingStep.DelegatedUtc = a.DelegatedUtc;
         }
 
         foreach (var existingStep in existing.ApprovalSteps.ToList())
@@ -855,7 +958,13 @@ internal sealed class EfFormsRepository : IFormsRepository
         }
         catch (DbUpdateConcurrencyException ex)
         {
+            logger.LogWarning(ex, "Concurrency conflict while saving entry {EntryId}.", entry.Id);
             throw new InvalidOperationException("The entry was updated by another user. Reload and retry.", ex);
+        }
+        catch (DbUpdateException ex)
+        {
+            logger.LogError(ex, "Database update failed while saving entry {EntryId}.", entry.Id);
+            throw new InvalidOperationException("The entry could not be saved due to a database update failure.", ex);
         }
 
         await transaction.CommitAsync(cancellationToken);
@@ -974,7 +1083,18 @@ internal sealed class EfFormsRepository : IFormsRepository
                 SendSubmissionCopyToSubmitter = entity.PublicationSendSubmissionCopyToSubmitter,
                 EditMode = entity.PublicationEditMode == 0
                     ? SubmissionEditMode.ImmutableRevisions
-                    : (SubmissionEditMode)entity.PublicationEditMode
+                    : (SubmissionEditMode)entity.PublicationEditMode,
+                OpenUtc = entity.PublicationOpenUtc,
+                CloseUtc = entity.PublicationCloseUtc,
+                NotYetOpenMessage = entity.PublicationNotYetOpenMessage,
+                ClosedMessage = entity.PublicationClosedMessage,
+                MaxSubmissions = entity.PublicationMaxSubmissions,
+                CapReachedMessage = entity.PublicationCapReachedMessage,
+                ConfirmationMessage = entity.PublicationConfirmationMessage,
+                ConfirmationRedirectUrl = entity.PublicationConfirmationRedirectUrl,
+                AccessPasswordHash = entity.PublicationAccessPasswordHash,
+                RequireCaptcha = entity.PublicationRequireCaptcha,
+                AutoSaveIntervalSeconds = entity.PublicationAutoSaveIntervalSeconds
             },
             Versions = entity.Versions.OrderBy(v => v.VersionNumber).Select(v => new FormVersionRecord
             {
@@ -996,6 +1116,19 @@ internal sealed class EfFormsRepository : IFormsRepository
                 Email = n.Email,
                 OnSubmission = n.OnSubmission,
                 OnApproval = n.OnApproval
+            }).ToList(),
+            Webhooks = entity.Webhooks.Select(w => new FormWebhookDefinition
+            {
+                Id = w.Id,
+                Url = w.Url,
+                Secret = w.Secret,
+                TriggerEvents = string.IsNullOrWhiteSpace(w.TriggerEventsJson)
+                    ? [WebhookTriggerEvent.EntrySubmitted]
+                    : (JsonSerializer.Deserialize<List<WebhookTriggerEvent>>(w.TriggerEventsJson) ?? [WebhookTriggerEvent.EntrySubmitted]),
+                Headers = string.IsNullOrWhiteSpace(w.HeadersJson)
+                    ? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    : (JsonSerializer.Deserialize<Dictionary<string, string>>(w.HeadersJson) ?? new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)),
+                IsEnabled = w.IsEnabled
             }).ToList()
         };
     }
@@ -1010,9 +1143,12 @@ internal sealed class EfFormsRepository : IFormsRepository
             SubmittedBy = entity.SubmittedBy,
             SubmittedByEmail = entity.SubmittedByEmail,
             SubmittedUtc = entity.SubmittedUtc,
+            StartedUtc = entity.StartedUtc,
             Status = (EntryStatus)entity.Status,
             Answers = new Dictionary<string, string?>(entity.Answers, StringComparer.OrdinalIgnoreCase),
             SearchIndex = new Dictionary<string, string>(entity.SearchIndex, StringComparer.OrdinalIgnoreCase),
+            Score = entity.Score,
+            QuizPassed = entity.QuizPassed,
             Files = entity.Files.Select(f => new EntryFileRecord
             {
                 Id = f.Id,
@@ -1042,10 +1178,18 @@ internal sealed class EfFormsRepository : IFormsRepository
                 ApproverId = a.ApproverId,
                 ApproverName = a.ApproverName,
                 ApproverEmail = a.ApproverEmail,
+                AcceptorMode = (ApprovalStepAcceptorMode)a.AcceptorMode,
+                Acceptors = string.IsNullOrWhiteSpace(a.AcceptorsJson)
+                    ? []
+                    : (JsonSerializer.Deserialize<List<ApprovalAcceptor>>(a.AcceptorsJson) ?? []),
+                Instructions = a.Instructions,
                 Status = (ApprovalStepStatus)a.Status,
                 Signature = a.Signature,
                 RejectionReason = a.RejectionReason,
-                CompletedUtc = a.CompletedUtc
+                CompletedUtc = a.CompletedUtc,
+                DelegatedToEmail = a.DelegatedToEmail,
+                DelegatedToName = a.DelegatedToName,
+                DelegatedUtc = a.DelegatedUtc
             }).ToList(),
             ApprovalAuditTrail = entity.ApprovalAuditTrail
                 .OrderBy(a => a.OccurredUtc)

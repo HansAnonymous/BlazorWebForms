@@ -1,6 +1,9 @@
 using BlazorWebForms.Core.Abstractions;
 using BlazorWebForms.Core.Models;
+using Microsoft.Extensions.Logging;
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.RegularExpressions;
 
 namespace BlazorWebForms.Core.Services;
@@ -17,12 +20,21 @@ public sealed class FormsApplicationService(
     IPdfExporter pdfExporter,
     ICoreMetadataCache metadataCache,
     IAntiAbuseGuard antiAbuseGuard,
-    IOperationalTelemetry telemetry)
+    IOperationalTelemetry telemetry,
+    IWebhookDispatcher webhookDispatcher,
+    IFormulaEvaluator formulaEvaluator,
+    ICaptchaValidator captchaValidator,
+    IFormAnalyticsStore analyticsStore,
+    ILogger<FormsApplicationService> logger)
 {
     private const int DefaultAdminEntryPageSize = 100;
 
-    public async Task SeedAsync(CancellationToken cancellationToken = default) =>
+    public async Task SeedAsync(CancellationToken cancellationToken = default)
+    {
+        logger.LogInformation("Forms seed started.");
         await repository.SeedAsync(cancellationToken);
+        logger.LogInformation("Forms seed completed.");
+    }
 
     public async Task<DashboardViewModel> GetDashboardAsync(CancellationToken cancellationToken = default)
     {
@@ -87,6 +99,28 @@ public sealed class FormsApplicationService(
         form.Publication.Slug = request.Slug;
         form.Publication.AccessMode = request.AccessMode;
         form.Publication.EditMode = request.EditMode;
+        form.Publication.OpenUtc = request.OpenUtc;
+        form.Publication.CloseUtc = request.CloseUtc;
+        form.Publication.NotYetOpenMessage = request.NotYetOpenMessage;
+        form.Publication.ClosedMessage = request.ClosedMessage;
+        form.Publication.MaxSubmissions = request.MaxSubmissions;
+        form.Publication.CapReachedMessage = request.CapReachedMessage;
+        form.Publication.ConfirmationMessage = request.ConfirmationMessage;
+        form.Publication.ConfirmationRedirectUrl = request.ConfirmationRedirectUrl;
+        form.Publication.RequireCaptcha = request.RequireCaptcha;
+        form.Publication.AutoSaveIntervalSeconds = request.AutoSaveIntervalSeconds;
+        if (request.AccessPasswordPlainText is not null)
+        {
+            if (!string.IsNullOrWhiteSpace(request.AccessPasswordPlainText))
+            {
+                form.Publication.AccessPasswordHash = HashAccessPassword(request.AccessPasswordPlainText);
+            }
+            else if (request.FormId.HasValue)
+            {
+                // Explicit empty string clears the password
+                form.Publication.AccessPasswordHash = string.Empty;
+            }
+        }
         SanitizeAndValidateBranding(request.Definition.Branding);
         ValidateLocalizationPayload(request.Definition);
         form.DraftDefinition = request.Definition;
@@ -95,6 +129,9 @@ public sealed class FormsApplicationService(
             .Where(email => !string.IsNullOrWhiteSpace(email))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .Select(email => new FormNotificationRule { Email = email.Trim() })
+            .ToList();
+        form.Webhooks = request.Webhooks
+            .Where(w => !string.IsNullOrWhiteSpace(w.Url))
             .ToList();
 
         if (!form.Permissions.Any())
@@ -109,6 +146,7 @@ public sealed class FormsApplicationService(
         }
 
         await repository.SaveFormAsync(form, cancellationToken);
+        logger.LogInformation("Form draft saved for FormId {FormId} by UserId {UserId}.", form.Id, user.UserId);
         metadataCache.InvalidateForms();
         return form;
     }
@@ -138,6 +176,7 @@ public sealed class FormsApplicationService(
         form.UpdatedUtc = DateTimeOffset.UtcNow;
 
         await repository.SaveFormAsync(form, cancellationToken);
+        logger.LogInformation("Form published for FormId {FormId} with Version {VersionNumber} by UserId {UserId}.", form.Id, version.VersionNumber, user.UserId);
         metadataCache.InvalidateForms();
         return version;
     }
@@ -146,6 +185,7 @@ public sealed class FormsApplicationService(
     {
         if (metadataCache.TryGetPublishedForm(slug, out var cachedViewModel))
         {
+            await analyticsStore.TrackViewAsync(cachedViewModel.Form.Id, cancellationToken);
             return cachedViewModel;
         }
 
@@ -155,16 +195,52 @@ public sealed class FormsApplicationService(
             return null;
         }
 
+        var now = DateTimeOffset.UtcNow;
         var version = form.Versions.OrderByDescending(v => v.VersionNumber).First();
+        var definition = serializer.Deserialize(version.DefinitionJson);
+
+        // Scheduling and access-cap checks
+        string? blockReason = null;
+        if (form.Publication.OpenUtc.HasValue && now < form.Publication.OpenUtc.Value)
+        {
+            blockReason = !string.IsNullOrWhiteSpace(form.Publication.NotYetOpenMessage)
+                ? form.Publication.NotYetOpenMessage
+                : $"This form opens on {form.Publication.OpenUtc.Value:f} UTC.";
+        }
+        else if (form.Publication.CloseUtc.HasValue && now > form.Publication.CloseUtc.Value)
+        {
+            blockReason = !string.IsNullOrWhiteSpace(form.Publication.ClosedMessage)
+                ? form.Publication.ClosedMessage
+                : "This form is no longer accepting submissions.";
+        }
+        else if (form.Publication.MaxSubmissions.HasValue)
+        {
+            var submissionCount = await repository.QueryEntriesAsync(new EntryQueryOptions
+            {
+                FormId = form.Id,
+                Statuses = [EntryStatus.Submitted, EntryStatus.NeedsApproval, EntryStatus.Approved, EntryStatus.Rejected],
+                Limit = form.Publication.MaxSubmissions.Value + 1
+            }, cancellationToken);
+            if (submissionCount.Count >= form.Publication.MaxSubmissions.Value)
+            {
+                blockReason = !string.IsNullOrWhiteSpace(form.Publication.CapReachedMessage)
+                    ? form.Publication.CapReachedMessage
+                    : "This form has reached its maximum number of responses.";
+            }
+        }
+
         var viewModel = new PublishedFormViewModel
         {
             Form = form,
             Version = version,
-            Definition = serializer.Deserialize(version.DefinitionJson),
-            CanSubmit = permissionEvaluator.CanSubmitForm(form, currentUserContext.GetCurrentUser())
+            Definition = definition,
+            CanSubmit = permissionEvaluator.CanSubmitForm(form, currentUserContext.GetCurrentUser()),
+            IsAcceptingSubmissions = blockReason is null,
+            AccessBlockReason = blockReason
         };
 
         metadataCache.SetPublishedForm(slug, viewModel);
+        await analyticsStore.TrackViewAsync(form.Id, cancellationToken);
         return viewModel;
     }
 
@@ -240,7 +316,10 @@ public sealed class FormsApplicationService(
         return entry;
     }
 
-    public async Task<EntryRecord> SubmitEntryAsync(Guid formId, SubmitEntryRequest request, CancellationToken cancellationToken = default)
+    public async Task<EntryRecord> SubmitEntryAsync(Guid formId, SubmitEntryRequest request, CancellationToken cancellationToken = default) =>
+        (await SubmitEntryWithResultAsync(formId, request, cancellationToken)).Entry;
+
+    public async Task<FormSubmissionResult> SubmitEntryWithResultAsync(Guid formId, SubmitEntryRequest request, CancellationToken cancellationToken = default)
     {
         var form = await repository.GetFormAsync(formId, cancellationToken)
                    ?? throw new InvalidOperationException("Form not found.");
@@ -249,6 +328,64 @@ public sealed class FormsApplicationService(
         if (!permissionEvaluator.CanSubmitForm(form, user))
         {
             throw new InvalidOperationException("Current user cannot submit this form.");
+        }
+
+        // ── Access guards ────────────────────────────────────────────────────
+        var now = DateTimeOffset.UtcNow;
+        if (form.Publication.OpenUtc.HasValue && now < form.Publication.OpenUtc.Value)
+        {
+            throw new InvalidOperationException(
+                !string.IsNullOrWhiteSpace(form.Publication.NotYetOpenMessage)
+                    ? form.Publication.NotYetOpenMessage
+                    : "This form is not yet open for submissions.");
+        }
+        if (form.Publication.CloseUtc.HasValue && now > form.Publication.CloseUtc.Value)
+        {
+            throw new InvalidOperationException(
+                !string.IsNullOrWhiteSpace(form.Publication.ClosedMessage)
+                    ? form.Publication.ClosedMessage
+                    : "This form is closed.");
+        }
+        if (form.Publication.MaxSubmissions.HasValue)
+        {
+            var existing = await repository.QueryEntriesAsync(new EntryQueryOptions
+            {
+                FormId = form.Id,
+                Statuses = [EntryStatus.Submitted, EntryStatus.NeedsApproval, EntryStatus.Approved, EntryStatus.Rejected],
+                Limit = form.Publication.MaxSubmissions.Value + 1
+            }, cancellationToken);
+            if (existing.Count >= form.Publication.MaxSubmissions.Value)
+            {
+                throw new InvalidOperationException(
+                    !string.IsNullOrWhiteSpace(form.Publication.CapReachedMessage)
+                        ? form.Publication.CapReachedMessage
+                        : "This form has reached its maximum number of responses.");
+            }
+        }
+
+        // ── Password check ───────────────────────────────────────────────────
+        if (!string.IsNullOrWhiteSpace(form.Publication.AccessPasswordHash))
+        {
+            if (string.IsNullOrWhiteSpace(request.AccessPassword))
+            {
+                throw new InvalidOperationException("An access password is required to submit this form.");
+            }
+            var supplied = request.AccessPassword;
+            if (!VerifyAccessPassword(supplied, form.Publication.AccessPasswordHash))
+            {
+                throw new InvalidOperationException("Incorrect access password.");
+            }
+        }
+
+        // ── CAPTCHA ──────────────────────────────────────────────────────────
+        if (form.Publication.RequireCaptcha)
+        {
+            var captchaToken = request.CaptchaToken ?? string.Empty;
+            var captchaValid = await captchaValidator.ValidateAsync(captchaToken, cancellationToken);
+            if (!captchaValid)
+            {
+                throw new InvalidOperationException("CAPTCHA validation failed. Please try again.");
+            }
         }
 
         var version = form.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault()
@@ -280,12 +417,16 @@ public sealed class FormsApplicationService(
         entry.SubmittedBy = user.DisplayName;
         entry.SubmittedByEmail = user.Email;
         entry.SubmittedUtc = DateTimeOffset.UtcNow;
+        entry.StartedUtc = request.StartedUtc ?? entry.StartedUtc;
         entry.Answers = new Dictionary<string, string?>(request.Answers, StringComparer.OrdinalIgnoreCase);
+
+        // ── Formula / calculated fields ──────────────────────────────────────
+        ApplyFormulaFields(definition, entry.Answers);
+
         entry.Status = request.Approvers.Count > 0 ? EntryStatus.NeedsApproval : EntryStatus.Submitted;
         var revisionNumber = entry.Revisions.Count + 1;
 
         entry.SearchIndex = SearchIndexBuilder.Build(definition, entry.Answers);
-
         entry.Files = EntryFileMapper.MapFiles(request.Files, user.UserId, user.Email, revisionNumber);
         EntryFileMapper.ApplyFileAnswers(entry.Answers, request.Files);
 
@@ -297,21 +438,35 @@ public sealed class FormsApplicationService(
             Answers = new Dictionary<string, string?>(entry.Answers, StringComparer.OrdinalIgnoreCase)
         });
 
-        entry.ApprovalSteps = request.Approvers
-            .Select((approver, index) => new ApprovalStepRecord
-            {
-                Order = index + 1,
-                ApproverId = approver.Id,
-                ApproverName = !string.IsNullOrEmpty(approver.DisplayName) ? approver.DisplayName : approver.Name,
-                ApproverEmail = approver.Email
-            })
-            .ToList();
+        // ── Approval steps — with calculated routing ─────────────────────────
+        entry.ApprovalSteps = BuildApprovalSteps(request, definition, entry.Answers);
+
+        // ── Quiz / scoring ───────────────────────────────────────────────────
+        if (definition.IsQuizMode)
+        {
+            entry.Score = ComputeQuizScore(definition, entry.Answers);
+            entry.QuizPassed = definition.PassScore.HasValue ? entry.Score >= definition.PassScore.Value : null;
+        }
 
         await repository.SaveEntryAsync(entry, cancellationToken);
         metadataCache.InvalidateForms();
         await emailNotifier.NotifyManagersAsync(form, entry, cancellationToken);
         await NotifyPendingApproverAssignmentsAsync(form, entry, cancellationToken);
-        return entry;
+        await webhookDispatcher.DispatchAsync(form, WebhookTriggerEvent.EntrySubmitted, entry, cancellationToken);
+
+        var completionTime = entry.StartedUtc.HasValue
+            ? (TimeSpan?)(entry.SubmittedUtc - entry.StartedUtc.Value)
+            : null;
+        await analyticsStore.TrackSubmissionAsync(form.Id, completionTime, cancellationToken);
+
+        return new FormSubmissionResult
+        {
+            Entry = entry,
+            Score = entry.Score,
+            QuizPassed = entry.QuizPassed,
+            ConfirmationMessage = form.Publication.ConfirmationMessage,
+            ConfirmationRedirectUrl = form.Publication.ConfirmationRedirectUrl
+        };
     }
 
     public async Task<EntryRecord> SaveDraftSubmissionAsync(Guid formId, SaveDraftSubmissionRequest request, CancellationToken cancellationToken = default)
@@ -1510,5 +1665,196 @@ public sealed class FormsApplicationService(
             await repository.SaveEntryAsync(entry, cancellationToken);
             metadataCache.InvalidateForms();
         }
+    }
+
+    // ── Analytics ─────────────────────────────────────────────────────────────
+
+    public async Task TrackFormAnalyticsAsync(TrackFormAnalyticsRequest request, CancellationToken cancellationToken = default)
+    {
+        switch (request.Event)
+        {
+            case FormAnalyticsEvent.View:
+                await analyticsStore.TrackViewAsync(request.FormId, cancellationToken);
+                break;
+            case FormAnalyticsEvent.Start:
+                await analyticsStore.TrackStartAsync(request.FormId, cancellationToken);
+                break;
+            case FormAnalyticsEvent.Submission:
+                var completionTime = request.CompletionSeconds.HasValue
+                    ? (TimeSpan?)TimeSpan.FromSeconds(request.CompletionSeconds.Value)
+                    : null;
+                await analyticsStore.TrackSubmissionAsync(request.FormId, completionTime, cancellationToken);
+                break;
+            case FormAnalyticsEvent.Abandon:
+                await analyticsStore.TrackAbandonAsync(request.FormId, cancellationToken);
+                break;
+        }
+    }
+
+    public async Task<FormAnalyticsViewModel?> GetFormAnalyticsAsync(Guid formId, CancellationToken cancellationToken = default)
+    {
+        var form = await repository.GetFormAsync(formId, cancellationToken);
+        if (form is null)
+        {
+            return null;
+        }
+        var user = currentUserContext.GetCurrentUser();
+        if (!permissionEvaluator.CanManageForm(form, user) && !user.Roles.Contains(FormPermissionRole.Admin))
+        {
+            return null;
+        }
+        var summary = await analyticsStore.GetSummaryAsync(formId, cancellationToken);
+        return new FormAnalyticsViewModel { Form = form, Summary = summary };
+    }
+
+    // ── Formula field helpers ────────────────────────────────────────────────
+
+    private void ApplyFormulaFields(FormDefinition definition, Dictionary<string, string?> answers)
+    {
+        foreach (var field in definition.Sections.SelectMany(s => s.Fields))
+        {
+            if ((field.Kind == FormFieldKind.Calculated || field.Kind == FormFieldKind.Hidden)
+                && !string.IsNullOrWhiteSpace(field.FormulaExpression))
+            {
+                answers[field.Id] = formulaEvaluator.Evaluate(field.FormulaExpression, answers);
+            }
+        }
+    }
+
+    // ── Quiz / scoring helpers ───────────────────────────────────────────────
+
+    private static decimal ComputeQuizScore(FormDefinition definition, IReadOnlyDictionary<string, string?> answers)
+    {
+        var total = 0m;
+        foreach (var field in definition.Sections.SelectMany(s => s.Fields))
+        {
+            if (!answers.TryGetValue(field.Id, out var answer) || answer is null)
+            {
+                continue;
+            }
+
+            // Per-option points (Radio, Select, Checkbox)
+            foreach (var option in field.Options)
+            {
+                if (option.Points.HasValue &&
+                    answer.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+                          .Any(v => string.Equals(v, option.Value, StringComparison.OrdinalIgnoreCase)))
+                {
+                    total += option.Points.Value * field.ScoreWeight;
+                }
+            }
+
+            // Field-level correct answer
+            if (!string.IsNullOrWhiteSpace(field.CorrectAnswer) && field.Options.Count == 0)
+            {
+                if (string.Equals(answer, field.CorrectAnswer, StringComparison.OrdinalIgnoreCase))
+                {
+                    total += 1m * field.ScoreWeight;
+                }
+            }
+        }
+        return total;
+    }
+
+    // ── Approval step builder (with calculated routing) ──────────────────────
+
+    private List<ApprovalStepRecord> BuildApprovalSteps(
+        SubmitEntryRequest request,
+        FormDefinition definition,
+        IReadOnlyDictionary<string, string?> answers)
+    {
+        // If the form definition has a workflow, resolve calculated expressions first
+        var workflowSteps = definition.ApprovalWorkflow?.Steps ?? [];
+
+        var steps = request.Approvers
+            .Select((approver, index) =>
+            {
+                var workflowStep = index < workflowSteps.Count ? workflowSteps[index] : null;
+
+                // Calculated routing: expression overrides the static approver from the request
+                var resolvedEmail = approver.Email;
+                var resolvedName = !string.IsNullOrEmpty(approver.DisplayName) ? approver.DisplayName : approver.Name;
+                if (workflowStep is not null)
+                {
+                    if (!string.IsNullOrWhiteSpace(workflowStep.ApproverEmailExpression))
+                    {
+                        resolvedEmail = formulaEvaluator.Evaluate(workflowStep.ApproverEmailExpression, answers)
+                                        ?? approver.Email;
+                    }
+                    if (!string.IsNullOrWhiteSpace(workflowStep.ApproverNameExpression))
+                    {
+                        resolvedName = formulaEvaluator.Evaluate(workflowStep.ApproverNameExpression, answers)
+                                       ?? resolvedName;
+                    }
+                }
+
+                return new ApprovalStepRecord
+                {
+                    Order = index + 1,
+                    ApproverId = approver.Id,
+                    ApproverName = resolvedName,
+                    ApproverEmail = resolvedEmail,
+                    Instructions = workflowStep?.Instructions ?? string.Empty,
+                    AcceptorMode = request.StepAcceptors.ContainsKey(index)
+                        ? ApprovalStepAcceptorMode.AnyOf
+                        : ApprovalStepAcceptorMode.Single,
+                    Acceptors = request.StepAcceptors.TryGetValue(index, out var acceptors)
+                        ? acceptors.Select(a => new ApprovalAcceptor { Id = a.Id, Name = a.Name, Email = a.Email }).ToList()
+                        : []
+                };
+            })
+            .ToList();
+
+        return steps;
+    }
+
+    // ── Password hashing ─────────────────────────────────────────────────────
+
+    private const int PasswordSaltSize = 16;
+    private const int PasswordHashSize = 32;
+    private const int PasswordIterations = 200_000;
+    private const HashAlgorithmName PasswordHashAlgorithm = HashAlgorithmName.SHA256;
+
+    // Stored format: "v1:<base64-salt>:<base64-hash>"
+    private static string HashAccessPassword(string plainText)
+    {
+        var salt = RandomNumberGenerator.GetBytes(PasswordSaltSize);
+        var hash = Rfc2898DeriveBytes.Pbkdf2(
+            Encoding.UTF8.GetBytes(plainText),
+            salt,
+            PasswordIterations,
+            PasswordHashAlgorithm,
+            PasswordHashSize);
+        return $"v1:{Convert.ToBase64String(salt)}:{Convert.ToBase64String(hash)}";
+    }
+
+    private static bool VerifyAccessPassword(string plainText, string storedHash)
+    {
+        // Legacy unsalted SHA-256 format (hex string, no "v1:" prefix)
+        if (!storedHash.StartsWith("v1:", StringComparison.Ordinal))
+        {
+            var legacyBytes = Encoding.UTF8.GetBytes(plainText);
+            var legacyHash = SHA256.HashData(legacyBytes);
+            var legacyHex = Convert.ToHexString(legacyHash).ToLowerInvariant();
+            return CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(legacyHex),
+                Encoding.UTF8.GetBytes(storedHash));
+        }
+
+        var parts = storedHash.Split(':');
+        if (parts.Length != 3)
+        {
+            return false;
+        }
+
+        var salt = Convert.FromBase64String(parts[1]);
+        var expected = Convert.FromBase64String(parts[2]);
+        var actual = Rfc2898DeriveBytes.Pbkdf2(
+            Encoding.UTF8.GetBytes(plainText),
+            salt,
+            PasswordIterations,
+            PasswordHashAlgorithm,
+            PasswordHashSize);
+        return CryptographicOperations.FixedTimeEquals(actual, expected);
     }
 }

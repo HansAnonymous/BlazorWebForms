@@ -1161,7 +1161,7 @@ dotnet ef migrations script \
 
 Your startup project must register `BlazorWebFormsSqlServer` with a valid connection string so EF can locate the `DbContext`.
 
-All tables are created under the schema configured by `SchemaName` (default `bwf`). SQL Server–compatible types are used throughout: `uniqueidentifier`, `nvarchar`, `datetimeoffset`, `rowversion`.
+All tables are created under the schema configured by `SchemaName` (default `bwf`). SQL Server-compatible types are used throughout: `uniqueidentifier`, `nvarchar`, `datetimeoffset`, `rowversion`.
 
 ---
 
@@ -1343,7 +1343,7 @@ Three static/injectable utilities from `BlazorWebForms.Core.Services` do the non
 | Helper | Kind | What it does |
 |---|---|---|
 | `FormLocalizationResolver.ResolveText(...)` | `static` | Resolves the correct localized string for a field/section with culture fallback |
-| `FormLayoutResolver.ResolveSectionColumns(section)` | `static` | Returns the configured column count (1–4) for a section |
+| `FormLayoutResolver.ResolveSectionColumns(section)` | `static` | Returns the configured column count (1-4) for a section |
 | `FormLayoutResolver.ResolveFieldWidthHint(field)` | `static` | Returns `"Auto"`, `"Half"`, `"Full"`, `"Third"`, or `"TwoThirds"` |
 | `IConditionEvaluator` | injected | Evaluates `VisibilityConditionDefinition` against the current answers dictionary |
 

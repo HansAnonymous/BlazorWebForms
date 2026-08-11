@@ -84,7 +84,7 @@ public sealed class FormPublication
 | `IsPublished` | `true` if at least one `FormVersionRecord` exists |
 
 **Slug rules**:
-- Must be 3–100 characters
+- Must be 3-100 characters
 - Alphanumeric, hyphens, underscores only
 - Lowercase preferred
 - Unique across forms with the same `AccessMode` (e.g. two public forms cannot share a slug)

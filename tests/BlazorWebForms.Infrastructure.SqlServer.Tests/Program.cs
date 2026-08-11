@@ -3,6 +3,9 @@ using BlazorWebForms.Core.Models;
 using BlazorWebForms.Core.Services;
 using BlazorWebForms.Infrastructure.SqlServer;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+
+RunOptionsValidationGuards();
 
 var services = new ServiceCollection();
 services.AddBlazorWebFormsCore();
@@ -12,7 +15,10 @@ services.AddBlazorWebFormsSqlServer(options =>
     options.SchemaName = "forms";
     options.ConnectionString = $"Server=(localdb)\\MSSQLLocalDB;Database=BlazorWebFormsTests_{Guid.NewGuid():N};Trusted_Connection=True;MultipleActiveResultSets=True;";
     options.EnableOutboundEmail = true;
+    options.EmailFromAddress = "noreply-tests@example.com";
     options.EnableGraphIntegration = true;
+    options.GraphSender = "sender-tests@example.com";
+    options.GraphAccessToken = "test-token";
     options.EmailProviderStrategy = "DryRun";
 });
 
@@ -397,6 +403,65 @@ static async Task AssertThrowsAsync(Func<Task> action, string message)
         return;
     }
     catch (FileNotFoundException)
+    {
+        return;
+    }
+
+    throw new InvalidOperationException(message);
+}
+
+static void RunOptionsValidationGuards()
+{
+    AssertThrows<OptionsValidationException>(() =>
+    {
+        var invalidServices = new ServiceCollection();
+        invalidServices.AddBlazorWebFormsCore();
+        invalidServices.AddBlazorWebFormsSqlServer(options =>
+        {
+            options.ConnectionString = "";
+            options.StorageRoot = "";
+            options.EnableLocalFileStorage = true;
+        });
+    }, "Invalid SQL options should fail registration when required values are missing.");
+
+    AssertThrows<OptionsValidationException>(() =>
+    {
+        var invalidServices = new ServiceCollection();
+        invalidServices.AddBlazorWebFormsCore();
+        invalidServices.AddBlazorWebFormsSqlServer(options =>
+        {
+            options.ConnectionString = "Server=(localdb)\\MSSQLLocalDB;Database=ValidationOnly;Trusted_Connection=True;";
+            options.EnableOutboundEmail = true;
+            options.EmailProviderStrategy = "SendGrid";
+            options.SendGridApiKey = null;
+            options.EmailFromAddress = "sender@example.com";
+        });
+    }, "SendGrid strategy without API key should fail options validation.");
+
+    AssertThrows<OptionsValidationException>(() =>
+    {
+        var invalidServices = new ServiceCollection();
+        invalidServices.AddBlazorWebFormsCore();
+        invalidServices.AddBlazorWebFormsSqlServer(options =>
+        {
+            options.ConnectionString = "Server=(localdb)\\MSSQLLocalDB;Database=ValidationOnly;Trusted_Connection=True;";
+            options.EnableOutboundEmail = true;
+            options.EmailFromAddress = "sender@example.com";
+            options.EnableGraphIntegration = true;
+            options.GraphSender = null;
+            options.GraphAccessToken = null;
+        });
+    }, "Graph integration without sender/token should fail options validation.");
+}
+
+static void AssertThrows<TException>(Action action, string message)
+    where TException : Exception
+{
+    try
+    {
+        action();
+    }
+    catch (TException)
     {
         return;
     }

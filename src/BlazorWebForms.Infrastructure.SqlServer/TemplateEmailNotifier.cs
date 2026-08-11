@@ -1,5 +1,6 @@
 using BlazorWebForms.Core.Abstractions;
 using BlazorWebForms.Core.Models;
+using Microsoft.Extensions.Logging;
 
 namespace BlazorWebForms.Infrastructure.SqlServer;
 
@@ -8,7 +9,8 @@ internal sealed class TemplateEmailNotifier(
     IEmailIntegration emailIntegration,
     IGraphIntegration graphIntegration,
     IAntiAbuseGuard antiAbuseGuard,
-    IOperationalTelemetry telemetry) : IEmailNotifier
+    IOperationalTelemetry telemetry,
+    ILogger<TemplateEmailNotifier> logger) : IEmailNotifier
 {
     private readonly HashSet<string> sentKeys = new(StringComparer.Ordinal);
 
@@ -156,6 +158,7 @@ internal sealed class TemplateEmailNotifier(
     {
         if (!sentKeys.Add(key))
         {
+            logger.LogDebug("Skipping duplicate email notification for key {NotificationKey}.", key);
             return null;
         }
 
@@ -178,6 +181,7 @@ internal sealed class TemplateEmailNotifier(
                 last = ex;
                 telemetry.TrackEmailDelivery("email", success: false);
                 telemetry.TrackFailure("email", "send", ex.GetType().Name);
+                logger.LogWarning(ex, "Email delivery attempt {Attempt} failed for key {NotificationKey}. Retrying.", attempt, key);
                 await Task.Delay(TimeSpan.FromMilliseconds(options.EmailRetryDelayMs), cancellationToken);
             }
             catch (Exception ex)
@@ -185,10 +189,12 @@ internal sealed class TemplateEmailNotifier(
                 last = ex;
                 telemetry.TrackEmailDelivery("email", success: false);
                 telemetry.TrackFailure("email", "send", ex.GetType().Name);
+                logger.LogError(ex, "Email delivery failed on final attempt {Attempt} for key {NotificationKey}.", attempt, key);
                 break;
             }
         }
 
+        logger.LogError(last, "Email delivery failed after {RetryCount} attempts for key {NotificationKey}.", options.EmailRetryCount, key);
         throw new InvalidOperationException(
             $"Email delivery failed after {options.EmailRetryCount} attempt(s) for key '{key}'.",
             last);

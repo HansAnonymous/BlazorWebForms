@@ -21,6 +21,8 @@ public sealed class BlazorWebFormsDbContext : DbContext
     public DbSet<FormPermissionEntity> FormPermissions { get; set; } = null!;
     public DbSet<FormNotificationEntity> FormNotifications { get; set; } = null!;
     public DbSet<FormInvitationEntity> FormInvitations { get; set; } = null!;
+    public DbSet<FormWebhookEntity> FormWebhooks { get; set; } = null!;
+    public DbSet<FormAnalyticsEntity> FormAnalytics { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -42,6 +44,12 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.Property(x => x.Name).IsRequired();
             b.Property(x => x.Description).HasMaxLength(2000);
             b.Property(x => x.DraftDefinitionJson).HasColumnType("nvarchar(max)");
+            b.Property(x => x.PublicationNotYetOpenMessage).HasMaxLength(2000);
+            b.Property(x => x.PublicationClosedMessage).HasMaxLength(2000);
+            b.Property(x => x.PublicationCapReachedMessage).HasMaxLength(2000);
+            b.Property(x => x.PublicationConfirmationMessage).HasMaxLength(4000);
+            b.Property(x => x.PublicationConfirmationRedirectUrl).HasMaxLength(2048);
+            b.Property(x => x.PublicationAccessPasswordHash).HasMaxLength(256);
             b.Property(x => x.RowVersion).HasColumnType("rowversion").ValueGeneratedOnAddOrUpdate();
             b.HasIndex(x => x.Key).IsUnique();
             b.HasIndex(x => x.PublicationSlug).IsUnique();
@@ -49,6 +57,7 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.HasMany(x => x.Versions).WithOne(v => v.Form).HasForeignKey(v => v.FormId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Permissions).WithOne(p => p.Form).HasForeignKey(p => p.FormId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Notifications).WithOne(n => n.Form).HasForeignKey(n => n.FormId).OnDelete(DeleteBehavior.Cascade);
+            b.HasMany(x => x.Webhooks).WithOne(w => w.Form).HasForeignKey(w => w.FormId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<FormVersionEntity>(b =>
@@ -67,6 +76,7 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.Property(x => x.SubmittedByEmail).HasMaxLength(256);
             b.Property(x => x.Answers).HasConversion(dictNullableConverter).HasColumnType("nvarchar(max)");
             b.Property(x => x.SearchIndex).HasConversion(dictStringConverter).HasColumnType("nvarchar(max)");
+            b.Property(x => x.Score).HasColumnType("decimal(18,2)");
             b.Ignore(x => x.RowVersion);
             b.HasIndex(x => x.FormId);
             b.HasIndex(x => new { x.FormId, x.SubmittedUtc });
@@ -93,6 +103,10 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.ToTable("ApprovalSteps");
             b.HasKey(x => x.Id);
             b.Property(x => x.RejectionReason).HasMaxLength(2000);
+            b.Property(x => x.Instructions).HasMaxLength(4000);
+            b.Property(x => x.DelegatedToEmail).HasMaxLength(256);
+            b.Property(x => x.DelegatedToName).HasMaxLength(256);
+            b.Property(x => x.AcceptorsJson).HasColumnType("nvarchar(max)");
             b.HasIndex(x => new { x.EntryId, x.Order }).IsUnique();
             b.HasIndex(x => x.Status);
         });
@@ -137,6 +151,26 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.HasIndex(x => x.Token).IsUnique();
             b.HasIndex(x => new { x.FormId, x.Email, x.Status });
             b.HasOne(x => x.Form).WithMany().HasForeignKey(x => x.FormId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<FormWebhookEntity>(b =>
+        {
+            b.ToTable("FormWebhooks");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Url).HasMaxLength(2048).IsRequired();
+            b.Property(x => x.Secret).HasMaxLength(256);
+            b.Property(x => x.TriggerEventsJson).HasColumnType("nvarchar(max)");
+            b.Property(x => x.HeadersJson).HasColumnType("nvarchar(max)");
+            b.HasIndex(x => new { x.FormId, x.IsEnabled });
+            b.HasOne(x => x.Form).WithMany(f => f.Webhooks).HasForeignKey(x => x.FormId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<FormAnalyticsEntity>(b =>
+        {
+            b.ToTable("FormAnalytics");
+            b.HasKey(x => x.FormId);
+            b.Property(x => x.LastUpdatedUtc).HasColumnType("datetimeoffset");
+            b.HasOne(x => x.Form).WithOne().HasForeignKey<FormAnalyticsEntity>(x => x.FormId).OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<EntrySearchIndexEntity>(b =>

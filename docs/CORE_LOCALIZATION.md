@@ -369,7 +369,7 @@ catch (InvalidOperationException ex)
 
 ### Slug validation
 
-- Must be 3–100 characters
+- Must be 3-100 characters
 - Alphanumeric, hyphens, underscores only
 - Must be unique among published forms with the same `AccessMode`
 - **Error messages**:

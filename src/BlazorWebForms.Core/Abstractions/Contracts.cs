@@ -126,3 +126,59 @@ public interface ICustomFieldHandler
     string Kind { get; }
     void ValidateDefinition(FormFieldDefinition field);
 }
+
+/// <summary>Dispatches webhook payloads to configured endpoint URLs on form lifecycle events.</summary>
+public interface IWebhookDispatcher
+{
+    /// <summary>
+    /// Dispatches a webhook for the given <paramref name="triggerEvent"/> to all matching,
+    /// enabled endpoints on <paramref name="form"/>. Implementations are expected to be
+    /// fire-and-forget; failures should be logged but must not propagate.
+    /// </summary>
+    Task DispatchAsync(
+        FormAggregate form,
+        WebhookTriggerEvent triggerEvent,
+        EntryRecord entry,
+        CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Evaluates formula expressions that reference form field values.
+/// The default implementation handles basic arithmetic (<c>+</c> <c>-</c> <c>*</c> <c>/</c>) and
+/// field references (<c>{fieldId}</c>). Replace with a full expression engine via DI for advanced use.
+/// </summary>
+public interface IFormulaEvaluator
+{
+    /// <summary>
+    /// Evaluates <paramref name="expression"/> against the provided <paramref name="answers"/> dictionary.
+    /// Returns the result as a string, or <c>null</c> if the expression cannot be evaluated.
+    /// </summary>
+    string? Evaluate(string expression, IReadOnlyDictionary<string, string?> answers);
+}
+
+/// <summary>
+/// Validates a CAPTCHA token supplied by the client. The default implementation is a pass-through
+/// that always returns <c>true</c>. Replace with a real provider (reCAPTCHA, hCaptcha, Turnstile) via DI.
+/// </summary>
+public interface ICaptchaValidator
+{
+    Task<bool> ValidateAsync(string token, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Persists and retrieves form-level analytics counters. The default implementation is a no-op.
+/// Replace via DI with a real store (SQL, Redis, Application Insights, etc.).
+/// </summary>
+public interface IFormAnalyticsStore
+{
+    /// <summary>Increments the view counter for a form (called when the published form page is rendered).</summary>
+    Task TrackViewAsync(Guid formId, CancellationToken cancellationToken = default);
+    /// <summary>Increments the start counter (called when a draft is first saved or the first field is answered).</summary>
+    Task TrackStartAsync(Guid formId, CancellationToken cancellationToken = default);
+    /// <summary>Increments the submission counter and records the completion duration.</summary>
+    Task TrackSubmissionAsync(Guid formId, TimeSpan? completionTime, CancellationToken cancellationToken = default);
+    /// <summary>Increments the abandon counter (called when a draft ages out without a corresponding submission).</summary>
+    Task TrackAbandonAsync(Guid formId, CancellationToken cancellationToken = default);
+    /// <summary>Returns the aggregated analytics summary for a form.</summary>
+    Task<FormAnalyticsSummary> GetSummaryAsync(Guid formId, CancellationToken cancellationToken = default);
+}

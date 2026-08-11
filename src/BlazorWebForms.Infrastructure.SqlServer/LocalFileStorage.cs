@@ -24,7 +24,8 @@ internal sealed class LocalFileStorage(BlazorWebFormsSqlServerOptions options) :
             throw new InvalidOperationException($"Uploaded file exceeds configured limit of {maxAllowedBytes} bytes.");
         }
 
-        Directory.CreateDirectory(options.StorageRoot);
+        var storageRoot = Path.GetFullPath(options.StorageRoot);
+        Directory.CreateDirectory(storageRoot);
 
         var originalName = Path.GetFileName(request.FileName ?? string.Empty);
         if (string.IsNullOrWhiteSpace(originalName))
@@ -58,7 +59,7 @@ internal sealed class LocalFileStorage(BlazorWebFormsSqlServerOptions options) :
             Sha256 = ComputeSha256Hex(request.Content)
         };
 
-        var fullPath = Path.Combine(options.StorageRoot, stored.RelativePath);
+        var fullPath = ResolvePathUnderRoot(storageRoot, stored.RelativePath);
         Directory.CreateDirectory(Path.GetDirectoryName(fullPath)!);
         await File.WriteAllBytesAsync(fullPath, request.Content, cancellationToken);
         return stored;
@@ -174,13 +175,7 @@ internal sealed class LocalFileStorage(BlazorWebFormsSqlServerOptions options) :
             throw new InvalidOperationException("Relative file path is required.");
         }
 
-        var normalizedRelativePath = relativePath.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
-        var fullPath = Path.GetFullPath(Path.Combine(options.StorageRoot, normalizedRelativePath));
-        var rootPath = Path.GetFullPath(options.StorageRoot + Path.DirectorySeparatorChar);
-        if (!fullPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("Requested file path is invalid.");
-        }
+        var fullPath = ResolvePathUnderRoot(Path.GetFullPath(options.StorageRoot), relativePath);
 
         if (!File.Exists(fullPath))
         {
@@ -203,13 +198,7 @@ internal sealed class LocalFileStorage(BlazorWebFormsSqlServerOptions options) :
             return Task.CompletedTask;
         }
 
-        var normalizedRelativePath = relativePath.Replace('\\', Path.DirectorySeparatorChar).Replace('/', Path.DirectorySeparatorChar);
-        var fullPath = Path.GetFullPath(Path.Combine(options.StorageRoot, normalizedRelativePath));
-        var rootPath = Path.GetFullPath(options.StorageRoot + Path.DirectorySeparatorChar);
-        if (!fullPath.StartsWith(rootPath, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("Requested file path is invalid.");
-        }
+        var fullPath = ResolvePathUnderRoot(Path.GetFullPath(options.StorageRoot), relativePath);
 
         if (File.Exists(fullPath))
         {
@@ -222,5 +211,26 @@ internal sealed class LocalFileStorage(BlazorWebFormsSqlServerOptions options) :
     public static string ComputeSha256Hex(byte[] content)
     {
         return Convert.ToHexString(SHA256.HashData(content)).ToLowerInvariant();
+    }
+
+    private static string ResolvePathUnderRoot(string storageRoot, string relativePath)
+    {
+        var normalizedRoot = storageRoot.EndsWith(Path.DirectorySeparatorChar)
+            ? storageRoot
+            : storageRoot + Path.DirectorySeparatorChar;
+
+        var normalizedRelativePath = relativePath
+            .Replace('\\', Path.DirectorySeparatorChar)
+            .Replace('/', Path.DirectorySeparatorChar)
+            .TrimStart(Path.DirectorySeparatorChar);
+
+        var fullPath = Path.GetFullPath(Path.Combine(normalizedRoot, normalizedRelativePath));
+        var relative = Path.GetRelativePath(normalizedRoot, fullPath);
+        if (relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Requested file path is invalid.");
+        }
+
+        return fullPath;
     }
 }
