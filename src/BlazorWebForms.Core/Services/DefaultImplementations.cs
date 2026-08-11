@@ -173,7 +173,10 @@ internal sealed class SimpleFormulaEvaluator : IFormulaEvaluator
         var substituted = FieldRef.Replace(expression, match =>
         {
             var fieldId = match.Groups[1].Value;
-            return answers.TryGetValue(fieldId, out var v) && v is not null ? v : "0";
+            return answers.TryGetValue(fieldId, out var v) &&
+                   decimal.TryParse(v, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var n)
+                ? n.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                : "0";
         });
 
         try
