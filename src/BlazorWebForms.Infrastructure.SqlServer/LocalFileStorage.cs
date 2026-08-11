@@ -225,7 +225,8 @@ internal sealed class LocalFileStorage(BlazorWebFormsSqlServerOptions options) :
             .TrimStart(Path.DirectorySeparatorChar);
 
         var fullPath = Path.GetFullPath(Path.Combine(normalizedRoot, normalizedRelativePath));
-        if (!fullPath.StartsWith(normalizedRoot, StringComparison.OrdinalIgnoreCase))
+        var relative = Path.GetRelativePath(normalizedRoot, fullPath);
+        if (relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
         {
             throw new InvalidOperationException("Requested file path is invalid.");
         }
