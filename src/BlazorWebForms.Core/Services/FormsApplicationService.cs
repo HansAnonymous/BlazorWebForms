@@ -218,7 +218,7 @@ public sealed class FormsApplicationService(
             var submissionCount = await repository.QueryEntriesAsync(new EntryQueryOptions
             {
                 FormId = form.Id,
-                Status = EntryStatus.Submitted,
+                Statuses = [EntryStatus.Submitted, EntryStatus.NeedsApproval, EntryStatus.Approved, EntryStatus.Rejected],
                 Limit = form.Publication.MaxSubmissions.Value + 1
             }, cancellationToken);
             if (submissionCount.Count >= form.Publication.MaxSubmissions.Value)
@@ -348,7 +348,7 @@ public sealed class FormsApplicationService(
             var existing = await repository.QueryEntriesAsync(new EntryQueryOptions
             {
                 FormId = form.Id,
-                Status = EntryStatus.Submitted,
+                Statuses = [EntryStatus.Submitted, EntryStatus.NeedsApproval, EntryStatus.Approved, EntryStatus.Rejected],
                 Limit = form.Publication.MaxSubmissions.Value + 1
             }, cancellationToken);
             if (existing.Count >= form.Publication.MaxSubmissions.Value)

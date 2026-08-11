@@ -141,6 +141,7 @@ public sealed class EntryQueryOptions
 {
     public Guid? FormId { get; set; }
     public EntryStatus? Status { get; set; }
+    public IReadOnlyList<EntryStatus>? Statuses { get; set; }
     public DateTimeOffset? SubmittedFromUtc { get; set; }
     public DateTimeOffset? SubmittedToUtc { get; set; }
     public string? Search { get; set; }

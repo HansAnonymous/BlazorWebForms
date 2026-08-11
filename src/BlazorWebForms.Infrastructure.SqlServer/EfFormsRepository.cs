@@ -678,6 +678,12 @@ internal sealed class EfFormsRepository : IFormsRepository
         if (options.Status.HasValue)
             q = q.Where(e => e.Status == (int)options.Status.Value);
 
+        if (options.Statuses is { Count: > 0 })
+        {
+            var intStatuses = options.Statuses.Select(s => (int)s).ToList();
+            q = q.Where(e => intStatuses.Contains(e.Status));
+        }
+
         if (options.SubmittedFromUtc.HasValue)
             q = q.Where(e => e.SubmittedUtc >= options.SubmittedFromUtc.Value);
 
