@@ -370,10 +370,8 @@ public sealed class FormsApplicationService(
             {
                 throw new InvalidOperationException("An access password is required to submit this form.");
             }
-            var supplied = HashAccessPassword(request.AccessPassword);
-            if (!CryptographicOperations.FixedTimeEquals(
-                    Encoding.UTF8.GetBytes(supplied),
-                    Encoding.UTF8.GetBytes(form.Publication.AccessPasswordHash)))
+            var supplied = request.AccessPassword;
+            if (!VerifyAccessPassword(supplied, form.Publication.AccessPasswordHash))
             {
                 throw new InvalidOperationException("Incorrect access password.");
             }
@@ -1812,10 +1810,51 @@ public sealed class FormsApplicationService(
 
     // ── Password hashing ─────────────────────────────────────────────────────
 
+    private const int PasswordSaltSize = 16;
+    private const int PasswordHashSize = 32;
+    private const int PasswordIterations = 200_000;
+    private const HashAlgorithmName PasswordHashAlgorithm = HashAlgorithmName.SHA256;
+
+    // Stored format: "v1:<base64-salt>:<base64-hash>"
     private static string HashAccessPassword(string plainText)
     {
-        var bytes = Encoding.UTF8.GetBytes(plainText);
-        var hash = SHA256.HashData(bytes);
-        return Convert.ToHexString(hash).ToLowerInvariant();
+        var salt = RandomNumberGenerator.GetBytes(PasswordSaltSize);
+        var hash = Rfc2898DeriveBytes.Pbkdf2(
+            Encoding.UTF8.GetBytes(plainText),
+            salt,
+            PasswordIterations,
+            PasswordHashAlgorithm,
+            PasswordHashSize);
+        return $"v1:{Convert.ToBase64String(salt)}:{Convert.ToBase64String(hash)}";
+    }
+
+    private static bool VerifyAccessPassword(string plainText, string storedHash)
+    {
+        // Legacy unsalted SHA-256 format (hex string, no "v1:" prefix)
+        if (!storedHash.StartsWith("v1:", StringComparison.Ordinal))
+        {
+            var legacyBytes = Encoding.UTF8.GetBytes(plainText);
+            var legacyHash = SHA256.HashData(legacyBytes);
+            var legacyHex = Convert.ToHexString(legacyHash).ToLowerInvariant();
+            return CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(legacyHex),
+                Encoding.UTF8.GetBytes(storedHash));
+        }
+
+        var parts = storedHash.Split(':');
+        if (parts.Length != 3)
+        {
+            return false;
+        }
+
+        var salt = Convert.FromBase64String(parts[1]);
+        var expected = Convert.FromBase64String(parts[2]);
+        var actual = Rfc2898DeriveBytes.Pbkdf2(
+            Encoding.UTF8.GetBytes(plainText),
+            salt,
+            PasswordIterations,
+            PasswordHashAlgorithm,
+            PasswordHashSize);
+        return CryptographicOperations.FixedTimeEquals(actual, expected);
     }
 }
