@@ -364,6 +364,90 @@ internal sealed class EfFormsRepository : IFormsRepository
                     CONSTRAINT [DF_Forms_PublicationEditMode] DEFAULT (0);
             END;
 
+            IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Forms', N'PublicationOpenUtc') IS NULL
+            BEGIN
+                ALTER TABLE [Forms]
+                ADD [PublicationOpenUtc] DATETIMEOFFSET NULL;
+            END;
+
+            IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Forms', N'PublicationCloseUtc') IS NULL
+            BEGIN
+                ALTER TABLE [Forms]
+                ADD [PublicationCloseUtc] DATETIMEOFFSET NULL;
+            END;
+
+            IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Forms', N'PublicationNotYetOpenMessage') IS NULL
+            BEGIN
+                ALTER TABLE [Forms]
+                ADD [PublicationNotYetOpenMessage] NVARCHAR(2000) NOT NULL
+                    CONSTRAINT [DF_Forms_PublicationNotYetOpenMessage] DEFAULT (N'');
+            END;
+
+            IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Forms', N'PublicationClosedMessage') IS NULL
+            BEGIN
+                ALTER TABLE [Forms]
+                ADD [PublicationClosedMessage] NVARCHAR(2000) NOT NULL
+                    CONSTRAINT [DF_Forms_PublicationClosedMessage] DEFAULT (N'');
+            END;
+
+            IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Forms', N'PublicationMaxSubmissions') IS NULL
+            BEGIN
+                ALTER TABLE [Forms]
+                ADD [PublicationMaxSubmissions] INT NULL;
+            END;
+
+            IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Forms', N'PublicationCapReachedMessage') IS NULL
+            BEGIN
+                ALTER TABLE [Forms]
+                ADD [PublicationCapReachedMessage] NVARCHAR(2000) NOT NULL
+                    CONSTRAINT [DF_Forms_PublicationCapReachedMessage] DEFAULT (N'');
+            END;
+
+            IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Forms', N'PublicationConfirmationMessage') IS NULL
+            BEGIN
+                ALTER TABLE [Forms]
+                ADD [PublicationConfirmationMessage] NVARCHAR(4000) NOT NULL
+                    CONSTRAINT [DF_Forms_PublicationConfirmationMessage] DEFAULT (N'');
+            END;
+
+            IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Forms', N'PublicationConfirmationRedirectUrl') IS NULL
+            BEGIN
+                ALTER TABLE [Forms]
+                ADD [PublicationConfirmationRedirectUrl] NVARCHAR(2048) NOT NULL
+                    CONSTRAINT [DF_Forms_PublicationConfirmationRedirectUrl] DEFAULT (N'');
+            END;
+
+            IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Forms', N'PublicationAccessPasswordHash') IS NULL
+            BEGIN
+                ALTER TABLE [Forms]
+                ADD [PublicationAccessPasswordHash] NVARCHAR(256) NOT NULL
+                    CONSTRAINT [DF_Forms_PublicationAccessPasswordHash] DEFAULT (N'');
+            END;
+
+            IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Forms', N'PublicationRequireCaptcha') IS NULL
+            BEGIN
+                ALTER TABLE [Forms]
+                ADD [PublicationRequireCaptcha] BIT NOT NULL
+                    CONSTRAINT [DF_Forms_PublicationRequireCaptcha] DEFAULT (0);
+            END;
+
+            IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Forms', N'PublicationAutoSaveIntervalSeconds') IS NULL
+            BEGIN
+                ALTER TABLE [Forms]
+                ADD [PublicationAutoSaveIntervalSeconds] INT NULL;
+            END;
+
             IF OBJECT_ID(N'Entries', N'U') IS NOT NULL
                AND NOT EXISTS (
                     SELECT 1

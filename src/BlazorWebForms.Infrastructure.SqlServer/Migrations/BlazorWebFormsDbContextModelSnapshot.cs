@@ -263,9 +263,54 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                     b.Property<int>("PublicationAccessMode")
                         .HasColumnType("int");
 
+                    b.Property<string>("PublicationAccessPasswordHash")
+                        .IsRequired()
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<int?>("PublicationAutoSaveIntervalSeconds")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PublicationCapReachedMessage")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTimeOffset?>("PublicationCloseUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<string>("PublicationClosedMessage")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("PublicationConfirmationMessage")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("PublicationConfirmationRedirectUrl")
+                        .IsRequired()
+                        .HasMaxLength(2048)
+                        .HasColumnType("nvarchar(2048)");
+
                     b.Property<string>("PublicationDomain")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("PublicationMaxSubmissions")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PublicationNotYetOpenMessage")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTimeOffset?>("PublicationOpenUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<bool>("PublicationRequireCaptcha")
+                        .HasColumnType("bit");
 
                     b.Property<bool>("PublicationSendSubmissionCopyToSubmitter")
                         .HasColumnType("bit");
