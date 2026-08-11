@@ -23,7 +23,7 @@ public static class ServiceCollectionExtensions
             throw new OptionsValidationException(nameof(BlazorWebFormsSqlServerOptions), typeof(BlazorWebFormsSqlServerOptions), validationResult.Failures);
         }
 
-        services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<BlazorWebFormsSqlServerOptions>, BlazorWebFormsSqlServerOptionsValidator>());
+        // services.TryAddEnumerable(ServiceDescriptor.Singleton<IValidateOptions<BlazorWebFormsSqlServerOptions>, BlazorWebFormsSqlServerOptionsValidator>());
         services.AddSingleton(options);
         services.AddHttpClient("BlazorWebForms.Email.SendGrid");
         services.AddHttpClient("BlazorWebForms.Email.Graph");
