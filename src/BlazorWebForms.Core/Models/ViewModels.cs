@@ -176,7 +176,7 @@ public sealed class ApproverAcceptorInput
     public string Email { get; set; } = string.Empty;
 }
 
-/// <summary>Result of a submission returned to the caller after a successful <c>SubmitEntryAsync</c>.</summary>
+/// <summary>Result of a submission returned to the caller after a successful <c>SubmitEntryWithResultAsync</c>.</summary>
 public sealed class FormSubmissionResult
 {
     public required EntryRecord Entry { get; init; }

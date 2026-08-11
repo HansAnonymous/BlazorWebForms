@@ -316,7 +316,10 @@ public sealed class FormsApplicationService(
         return entry;
     }
 
-    public async Task<FormSubmissionResult> SubmitEntryAsync(Guid formId, SubmitEntryRequest request, CancellationToken cancellationToken = default)
+    public async Task<EntryRecord> SubmitEntryAsync(Guid formId, SubmitEntryRequest request, CancellationToken cancellationToken = default) =>
+        (await SubmitEntryWithResultAsync(formId, request, cancellationToken)).Entry;
+
+    public async Task<FormSubmissionResult> SubmitEntryWithResultAsync(Guid formId, SubmitEntryRequest request, CancellationToken cancellationToken = default)
     {
         var form = await repository.GetFormAsync(formId, cancellationToken)
                    ?? throw new InvalidOperationException("Form not found.");
