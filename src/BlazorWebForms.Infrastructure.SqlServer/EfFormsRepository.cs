@@ -356,6 +356,51 @@ internal sealed class EfFormsRepository : IFormsRepository
                     CONSTRAINT [DF_ApprovalSteps_ApproverId] DEFAULT (N'');
             END;
 
+            IF OBJECT_ID(N'ApprovalSteps', N'U') IS NOT NULL
+               AND COL_LENGTH(N'ApprovalSteps', N'AcceptorMode') IS NULL
+            BEGIN
+                ALTER TABLE [ApprovalSteps]
+                ADD [AcceptorMode] INT NOT NULL
+                    CONSTRAINT [DF_ApprovalSteps_AcceptorMode] DEFAULT (0);
+            END;
+
+            IF OBJECT_ID(N'ApprovalSteps', N'U') IS NOT NULL
+               AND COL_LENGTH(N'ApprovalSteps', N'AcceptorsJson') IS NULL
+            BEGIN
+                ALTER TABLE [ApprovalSteps]
+                ADD [AcceptorsJson] NVARCHAR(MAX) NOT NULL
+                    CONSTRAINT [DF_ApprovalSteps_AcceptorsJson] DEFAULT (N'[]');
+            END;
+
+            IF OBJECT_ID(N'ApprovalSteps', N'U') IS NOT NULL
+               AND COL_LENGTH(N'ApprovalSteps', N'Instructions') IS NULL
+            BEGIN
+                ALTER TABLE [ApprovalSteps]
+                ADD [Instructions] NVARCHAR(4000) NOT NULL
+                    CONSTRAINT [DF_ApprovalSteps_Instructions] DEFAULT (N'');
+            END;
+
+            IF OBJECT_ID(N'ApprovalSteps', N'U') IS NOT NULL
+               AND COL_LENGTH(N'ApprovalSteps', N'DelegatedToEmail') IS NULL
+            BEGIN
+                ALTER TABLE [ApprovalSteps]
+                ADD [DelegatedToEmail] NVARCHAR(256) NULL;
+            END;
+
+            IF OBJECT_ID(N'ApprovalSteps', N'U') IS NOT NULL
+               AND COL_LENGTH(N'ApprovalSteps', N'DelegatedToName') IS NULL
+            BEGIN
+                ALTER TABLE [ApprovalSteps]
+                ADD [DelegatedToName] NVARCHAR(256) NULL;
+            END;
+
+            IF OBJECT_ID(N'ApprovalSteps', N'U') IS NOT NULL
+               AND COL_LENGTH(N'ApprovalSteps', N'DelegatedUtc') IS NULL
+            BEGIN
+                ALTER TABLE [ApprovalSteps]
+                ADD [DelegatedUtc] DATETIMEOFFSET NULL;
+            END;
+
             IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
                AND COL_LENGTH(N'Forms', N'PublicationEditMode') IS NULL
             BEGIN
@@ -446,6 +491,61 @@ internal sealed class EfFormsRepository : IFormsRepository
             BEGIN
                 ALTER TABLE [Forms]
                 ADD [PublicationAutoSaveIntervalSeconds] INT NULL;
+            END;
+
+            IF OBJECT_ID(N'FormWebhooks', N'U') IS NULL
+               AND OBJECT_ID(N'Forms', N'U') IS NOT NULL
+            BEGIN
+                CREATE TABLE [FormWebhooks] (
+                    [Id] UNIQUEIDENTIFIER NOT NULL,
+                    [FormId] UNIQUEIDENTIFIER NOT NULL,
+                    [Url] NVARCHAR(2048) NOT NULL,
+                    [Secret] NVARCHAR(256) NOT NULL,
+                    [TriggerEventsJson] NVARCHAR(MAX) NOT NULL,
+                    [HeadersJson] NVARCHAR(MAX) NOT NULL,
+                    [IsEnabled] BIT NOT NULL CONSTRAINT [DF_FormWebhooks_IsEnabled] DEFAULT (1),
+                    CONSTRAINT [PK_FormWebhooks] PRIMARY KEY ([Id]),
+                    CONSTRAINT [FK_FormWebhooks_Forms_FormId] FOREIGN KEY ([FormId]) REFERENCES [Forms]([Id]) ON DELETE CASCADE
+                );
+
+                CREATE INDEX [IX_FormWebhooks_FormId_IsEnabled] ON [FormWebhooks] ([FormId], [IsEnabled]);
+            END;
+
+            IF OBJECT_ID(N'FormAnalytics', N'U') IS NULL
+               AND OBJECT_ID(N'Forms', N'U') IS NOT NULL
+            BEGIN
+                CREATE TABLE [FormAnalytics] (
+                    [FormId] UNIQUEIDENTIFIER NOT NULL,
+                    [ViewCount] BIGINT NOT NULL CONSTRAINT [DF_FormAnalytics_ViewCount] DEFAULT (0),
+                    [StartCount] BIGINT NOT NULL CONSTRAINT [DF_FormAnalytics_StartCount] DEFAULT (0),
+                    [SubmissionCount] BIGINT NOT NULL CONSTRAINT [DF_FormAnalytics_SubmissionCount] DEFAULT (0),
+                    [AbandonCount] BIGINT NOT NULL CONSTRAINT [DF_FormAnalytics_AbandonCount] DEFAULT (0),
+                    [AverageCompletionSeconds] FLOAT NOT NULL CONSTRAINT [DF_FormAnalytics_AverageCompletionSeconds] DEFAULT (0.0),
+                    [LastUpdatedUtc] DATETIMEOFFSET NULL,
+                    CONSTRAINT [PK_FormAnalytics] PRIMARY KEY ([FormId]),
+                    CONSTRAINT [FK_FormAnalytics_Forms_FormId] FOREIGN KEY ([FormId]) REFERENCES [Forms]([Id]) ON DELETE CASCADE
+                );
+            END;
+
+            IF OBJECT_ID(N'Entries', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Entries', N'StartedUtc') IS NULL
+            BEGIN
+                ALTER TABLE [Entries]
+                ADD [StartedUtc] DATETIMEOFFSET NULL;
+            END;
+
+            IF OBJECT_ID(N'Entries', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Entries', N'Score') IS NULL
+            BEGIN
+                ALTER TABLE [Entries]
+                ADD [Score] DECIMAL(18, 2) NULL;
+            END;
+
+            IF OBJECT_ID(N'Entries', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Entries', N'QuizPassed') IS NULL
+            BEGIN
+                ALTER TABLE [Entries]
+                ADD [QuizPassed] BIT NULL;
             END;
 
             IF OBJECT_ID(N'Entries', N'U') IS NOT NULL

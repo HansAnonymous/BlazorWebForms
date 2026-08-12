@@ -60,6 +60,29 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("int");
 
+                    b.Property<int>("AcceptorMode")
+                        .HasColumnType("int");
+
+                    b.Property<string>("AcceptorsJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Instructions")
+                        .IsRequired()
+                        .HasMaxLength(4000)
+                        .HasColumnType("nvarchar(4000)");
+
+                    b.Property<string>("DelegatedToEmail")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<string>("DelegatedToName")
+                        .HasMaxLength(256)
+                        .HasColumnType("nvarchar(256)");
+
+                    b.Property<DateTimeOffset?>("DelegatedUtc")
+                        .HasColumnType("datetimeoffset");
+
                     b.HasKey("Id");
 
                     b.HasIndex("EntryId");
@@ -111,6 +134,15 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
 
                     b.Property<DateTimeOffset>("SubmittedUtc")
                         .HasColumnType("datetimeoffset");
+
+                    b.Property<DateTimeOffset?>("StartedUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<decimal?>("Score")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<bool?>("QuizPassed")
+                        .HasColumnType("bit");
 
                     b.HasKey("Id");
 
@@ -529,10 +561,75 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
 
                     b.HasIndex("FormId", "ScopeType", "ScopeValue");
 
-                    b.ToTable("FormPermissions", (string)null);
+                             b.ToTable("FormPermissions", (string)null);
+                        });
+
+                    modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.FormWebhookEntity", b =>
+                        {
+                            b.Property<Guid>("Id")
+                                .ValueGeneratedOnAdd()
+                                .HasColumnType("uniqueidentifier");
+
+                            b.Property<Guid>("FormId")
+                                .HasColumnType("uniqueidentifier");
+
+                            b.Property<string>("HeadersJson")
+                                .IsRequired()
+                                .HasColumnType("nvarchar(max)");
+
+                            b.Property<bool>("IsEnabled")
+                                .HasColumnType("bit");
+
+                            b.Property<string>("Secret")
+                                .IsRequired()
+                                .HasMaxLength(256)
+                                .HasColumnType("nvarchar(256)");
+
+                            b.Property<string>("TriggerEventsJson")
+                                .IsRequired()
+                                .HasColumnType("nvarchar(max)");
+
+                            b.Property<string>("Url")
+                                .IsRequired()
+                                .HasMaxLength(2048)
+                                .HasColumnType("nvarchar(2048)");
+
+                            b.HasKey("Id");
+
+                            b.HasIndex("FormId", "IsEnabled");
+
+                            b.ToTable("FormWebhooks", (string)null);
+                        });
+
+                    modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.FormAnalyticsEntity", b =>
+                {
+                    b.Property<long>("AbandonCount")
+                        .HasColumnType("bigint");
+
+                    b.Property<double>("AverageCompletionSeconds")
+                        .HasColumnType("float");
+
+                    b.Property<Guid>("FormId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTimeOffset?>("LastUpdatedUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<long>("StartCount")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("SubmissionCount")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("ViewCount")
+                        .HasColumnType("bigint");
+
+                    b.HasKey("FormId");
+
+                    b.ToTable("FormAnalytics", (string)null);
                 });
 
-            modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.FormVersionEntity", b =>
+                    modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.FormVersionEntity", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
@@ -627,11 +724,33 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                     b.Navigation("Entry");
                 });
 
-            modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.FormNotificationEntity", b =>
+             modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.FormNotificationEntity", b =>
                 {
                     b.HasOne("BlazorWebForms.Infrastructure.SqlServer.FormEntity", "Form")
                         .WithMany("Notifications")
                         .HasForeignKey("FormId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Form");
+                });
+
+            modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.FormWebhookEntity", b =>
+                {
+                    b.HasOne("BlazorWebForms.Infrastructure.SqlServer.FormEntity", "Form")
+                        .WithMany("Webhooks")
+                        .HasForeignKey("FormId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Form");
+                });
+
+            modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.FormAnalyticsEntity", b =>
+                {
+                    b.HasOne("BlazorWebForms.Infrastructure.SqlServer.FormEntity", "Form")
+                        .WithOne()
+                        .HasForeignKey("BlazorWebForms.Infrastructure.SqlServer.FormAnalyticsEntity", "FormId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
@@ -683,13 +802,15 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                 });
 
             modelBuilder.Entity("BlazorWebForms.Infrastructure.SqlServer.FormEntity", b =>
-                {
-                    b.Navigation("Notifications");
+               {
+                   b.Navigation("Notifications");
 
-                    b.Navigation("Permissions");
+                   b.Navigation("Permissions");
 
-                    b.Navigation("Versions");
-                });
+                   b.Navigation("Versions");
+
+                   b.Navigation("Webhooks");
+               });
 #pragma warning restore 612, 618
         }
     }
