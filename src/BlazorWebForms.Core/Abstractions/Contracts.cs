@@ -140,6 +140,16 @@ public interface IWebhookDispatcher
         WebhookTriggerEvent triggerEvent,
         EntryRecord entry,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sends a test delivery to a single <paramref name="webhook"/> endpoint and returns
+    /// a result indicating whether the delivery succeeded. Unlike <see cref="DispatchAsync"/>
+    /// this method propagates errors to the caller so they can be surfaced in the UI.
+    /// </summary>
+    Task<WebhookTestResult> SendTestDeliveryAsync(
+        FormAggregate form,
+        FormWebhookDefinition webhook,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>

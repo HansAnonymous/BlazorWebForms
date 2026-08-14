@@ -650,191 +650,195 @@ internal sealed class EfFormsRepository : IFormsRepository
 
     public async Task SaveFormAsync(FormAggregate form, CancellationToken cancellationToken = default)
     {
-        db.ChangeTracker.Clear();
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-
-        var existing = await db.Forms
-            .Include(f => f.Versions)
-            .Include(f => f.Permissions)
-            .Include(f => f.Notifications)
-            .Include(f => f.Webhooks)
-            .FirstOrDefaultAsync(f => f.Id == form.Id, cancellationToken);
-
-        if (existing is null)
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
         {
-            existing = new FormEntity { Id = form.Id };
-            db.Forms.Add(existing);
-        }
+            db.ChangeTracker.Clear();
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
-        existing.Key = form.Key;
-        existing.Name = form.Name;
-        existing.Description = form.Description;
-        existing.OwnerUserId = form.OwnerUserId;
-        existing.UpdatedUtc = form.UpdatedUtc;
-        existing.DraftDefinitionJson = serializer.Serialize(form.DraftDefinition);
-        existing.PublicationSlug = form.Publication.Slug;
-        existing.PublicationDomain = form.Publication.Domain;
-        existing.PublicationAccessMode = (int)form.Publication.AccessMode;
-        existing.PublicationSendSubmissionCopyToSubmitter = form.Publication.SendSubmissionCopyToSubmitter;
-        existing.PublicationEditMode = (int)form.Publication.EditMode;
-        existing.PublicationOpenUtc = form.Publication.OpenUtc;
-        existing.PublicationCloseUtc = form.Publication.CloseUtc;
-        existing.PublicationNotYetOpenMessage = form.Publication.NotYetOpenMessage;
-        existing.PublicationClosedMessage = form.Publication.ClosedMessage;
-        existing.PublicationMaxSubmissions = form.Publication.MaxSubmissions;
-        existing.PublicationCapReachedMessage = form.Publication.CapReachedMessage;
-        existing.PublicationConfirmationMessage = form.Publication.ConfirmationMessage;
-        existing.PublicationConfirmationRedirectUrl = form.Publication.ConfirmationRedirectUrl;
-        existing.PublicationAccessPasswordHash = form.Publication.AccessPasswordHash;
-        existing.PublicationRequireCaptcha = form.Publication.RequireCaptcha;
-        existing.PublicationAutoSaveIntervalSeconds = form.Publication.AutoSaveIntervalSeconds;
+            var existing = await db.Forms
+                .Include(f => f.Versions)
+                .Include(f => f.Permissions)
+                .Include(f => f.Notifications)
+                .Include(f => f.Webhooks)
+                .FirstOrDefaultAsync(f => f.Id == form.Id, cancellationToken);
 
-        // Form versions are immutable snapshots; append new ones only.
-        var existingVersionIds = existing.Versions.Select(v => v.Id).ToHashSet();
-        foreach (var v in form.Versions)
-        {
-            if (existingVersionIds.Contains(v.Id))
+            if (existing is null)
             {
-                continue;
+                existing = new FormEntity { Id = form.Id };
+                db.Forms.Add(existing);
             }
 
-            db.FormVersions.Add(new FormVersionEntity
-            {
-                Id = v.Id,
-                FormId = existing.Id,
-                VersionNumber = v.VersionNumber,
-                CreatedUtc = v.CreatedUtc,
-                DefinitionJson = v.DefinitionJson
-            });
-        }
+            existing.Key = form.Key;
+            existing.Name = form.Name;
+            existing.Description = form.Description;
+            existing.OwnerUserId = form.OwnerUserId;
+            existing.UpdatedUtc = form.UpdatedUtc;
+            existing.DraftDefinitionJson = serializer.Serialize(form.DraftDefinition);
+            existing.PublicationSlug = form.Publication.Slug;
+            existing.PublicationDomain = form.Publication.Domain;
+            existing.PublicationAccessMode = (int)form.Publication.AccessMode;
+            existing.PublicationSendSubmissionCopyToSubmitter = form.Publication.SendSubmissionCopyToSubmitter;
+            existing.PublicationEditMode = (int)form.Publication.EditMode;
+            existing.PublicationOpenUtc = form.Publication.OpenUtc;
+            existing.PublicationCloseUtc = form.Publication.CloseUtc;
+            existing.PublicationNotYetOpenMessage = form.Publication.NotYetOpenMessage;
+            existing.PublicationClosedMessage = form.Publication.ClosedMessage;
+            existing.PublicationMaxSubmissions = form.Publication.MaxSubmissions;
+            existing.PublicationCapReachedMessage = form.Publication.CapReachedMessage;
+            existing.PublicationConfirmationMessage = form.Publication.ConfirmationMessage;
+            existing.PublicationConfirmationRedirectUrl = form.Publication.ConfirmationRedirectUrl;
+            existing.PublicationAccessPasswordHash = form.Publication.AccessPasswordHash;
+            existing.PublicationRequireCaptcha = form.Publication.RequireCaptcha;
+            existing.PublicationAutoSaveIntervalSeconds = form.Publication.AutoSaveIntervalSeconds;
 
-        var desiredPermissionsByUserId = form.Permissions
-            .Where(p => p.UserId != Guid.Empty)
-            .GroupBy(p => p.UserId)
-            .ToDictionary(g => g.Key, g => g.First());
-
-        foreach (var existingPermission in existing.Permissions.ToList())
-        {
-            if (!desiredPermissionsByUserId.ContainsKey(existingPermission.UserId))
+            // Form versions are immutable snapshots; append new ones only.
+            var existingVersionIds = existing.Versions.Select(v => v.Id).ToHashSet();
+            foreach (var v in form.Versions)
             {
-                db.FormPermissions.Remove(existingPermission);
-            }
-        }
-
-        foreach (var desired in desiredPermissionsByUserId.Values)
-        {
-            var match = existing.Permissions.FirstOrDefault(p => p.UserId == desired.UserId);
-            if (match is null)
-            {
-                existing.Permissions.Add(new FormPermissionEntity
+                if (existingVersionIds.Contains(v.Id))
                 {
-                    Id = Guid.NewGuid(),
-                    UserId = desired.UserId,
-                    DisplayName = desired.DisplayName,
-                    Role = (int)desired.Role,
-                    ScopeType = string.IsNullOrWhiteSpace(desired.ScopeType) ? "Form" : desired.ScopeType,
-                    ScopeValue = desired.ScopeValue,
-                    UpdatedByUserId = form.OwnerUserId,
-                    UpdatedUtc = DateTimeOffset.UtcNow
-                });
-                continue;
-            }
+                    continue;
+                }
 
-            match.DisplayName = desired.DisplayName;
-            match.Role = (int)desired.Role;
-            match.ScopeType = string.IsNullOrWhiteSpace(desired.ScopeType) ? "Form" : desired.ScopeType;
-            match.ScopeValue = desired.ScopeValue;
-            match.UpdatedByUserId = form.OwnerUserId;
-            match.UpdatedUtc = DateTimeOffset.UtcNow;
-        }
-
-        var desiredNotificationsByEmail = form.Notifications
-            .Where(n => !string.IsNullOrWhiteSpace(n.Email))
-            .GroupBy(n => n.Email.Trim(), StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
-
-        foreach (var existingNotification in existing.Notifications.ToList())
-        {
-            if (!desiredNotificationsByEmail.ContainsKey(existingNotification.Email))
-            {
-                db.FormNotifications.Remove(existingNotification);
-            }
-        }
-
-        foreach (var desired in desiredNotificationsByEmail.Values)
-        {
-            var match = existing.Notifications.FirstOrDefault(n =>
-                string.Equals(n.Email, desired.Email, StringComparison.OrdinalIgnoreCase));
-
-            if (match is null)
-            {
-                existing.Notifications.Add(new FormNotificationEntity
+                db.FormVersions.Add(new FormVersionEntity
                 {
-                    Id = Guid.NewGuid(),
-                    Email = desired.Email.Trim(),
-                    OnSubmission = desired.OnSubmission,
-                    OnApproval = desired.OnApproval
-                });
-                continue;
-            }
-
-            match.OnSubmission = desired.OnSubmission;
-            match.OnApproval = desired.OnApproval;
-        }
-
-        var desiredWebhooksById = form.Webhooks.Where(w => !string.IsNullOrWhiteSpace(w.Url)).ToDictionary(w => w.Id);
-        foreach (var existingWebhook in existing.Webhooks.ToList())
-        {
-            if (!desiredWebhooksById.ContainsKey(existingWebhook.Id))
-            {
-                db.FormWebhooks.Remove(existingWebhook);
-            }
-        }
-
-        foreach (var desired in desiredWebhooksById.Values)
-        {
-            var match = existing.Webhooks.FirstOrDefault(w => w.Id == desired.Id);
-            var triggerEventsJson = JsonSerializer.Serialize(desired.TriggerEvents);
-            var headersJson = JsonSerializer.Serialize(desired.Headers);
-
-            if (match is null)
-            {
-                existing.Webhooks.Add(new FormWebhookEntity
-                {
-                    Id = desired.Id,
+                    Id = v.Id,
                     FormId = existing.Id,
-                    Url = desired.Url,
-                    Secret = desired.Secret,
-                    TriggerEventsJson = triggerEventsJson,
-                    HeadersJson = headersJson,
-                    IsEnabled = desired.IsEnabled
+                    VersionNumber = v.VersionNumber,
+                    CreatedUtc = v.CreatedUtc,
+                    DefinitionJson = v.DefinitionJson
                 });
-                continue;
             }
 
-            match.Url = desired.Url;
-            match.Secret = desired.Secret;
-            match.TriggerEventsJson = triggerEventsJson;
-            match.HeadersJson = headersJson;
-            match.IsEnabled = desired.IsEnabled;
-        }
+            var desiredPermissionsByUserId = form.Permissions
+                .Where(p => p.UserId != Guid.Empty)
+                .GroupBy(p => p.UserId)
+                .ToDictionary(g => g.Key, g => g.First());
 
-        try
-        {
-            await db.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateConcurrencyException ex)
-        {
-            logger.LogWarning(ex, "Concurrency conflict while saving form {FormId}.", form.Id);
-            throw new InvalidOperationException("The form was updated by another user. Reload and retry.", ex);
-        }
-        catch (DbUpdateException ex)
-        {
-            logger.LogError(ex, "Database update failed while saving form {FormId}.", form.Id);
-            throw new InvalidOperationException("The form could not be saved due to a database update failure.", ex);
-        }
+            foreach (var existingPermission in existing.Permissions.ToList())
+            {
+                if (!desiredPermissionsByUserId.ContainsKey(existingPermission.UserId))
+                {
+                    db.FormPermissions.Remove(existingPermission);
+                }
+            }
 
-        await transaction.CommitAsync(cancellationToken);
+            foreach (var desired in desiredPermissionsByUserId.Values)
+            {
+                var match = existing.Permissions.FirstOrDefault(p => p.UserId == desired.UserId);
+                if (match is null)
+                {
+                    existing.Permissions.Add(new FormPermissionEntity
+                    {
+                        Id = Guid.NewGuid(),
+                        UserId = desired.UserId,
+                        DisplayName = desired.DisplayName,
+                        Role = (int)desired.Role,
+                        ScopeType = string.IsNullOrWhiteSpace(desired.ScopeType) ? "Form" : desired.ScopeType,
+                        ScopeValue = desired.ScopeValue,
+                        UpdatedByUserId = form.OwnerUserId,
+                        UpdatedUtc = DateTimeOffset.UtcNow
+                    });
+                    continue;
+                }
+
+                match.DisplayName = desired.DisplayName;
+                match.Role = (int)desired.Role;
+                match.ScopeType = string.IsNullOrWhiteSpace(desired.ScopeType) ? "Form" : desired.ScopeType;
+                match.ScopeValue = desired.ScopeValue;
+                match.UpdatedByUserId = form.OwnerUserId;
+                match.UpdatedUtc = DateTimeOffset.UtcNow;
+            }
+
+            var desiredNotificationsByEmail = form.Notifications
+                .Where(n => !string.IsNullOrWhiteSpace(n.Email))
+                .GroupBy(n => n.Email.Trim(), StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+            foreach (var existingNotification in existing.Notifications.ToList())
+            {
+                if (!desiredNotificationsByEmail.ContainsKey(existingNotification.Email))
+                {
+                    db.FormNotifications.Remove(existingNotification);
+                }
+            }
+
+            foreach (var desired in desiredNotificationsByEmail.Values)
+            {
+                var match = existing.Notifications.FirstOrDefault(n =>
+                    string.Equals(n.Email, desired.Email, StringComparison.OrdinalIgnoreCase));
+
+                if (match is null)
+                {
+                    existing.Notifications.Add(new FormNotificationEntity
+                    {
+                        Id = Guid.NewGuid(),
+                        Email = desired.Email.Trim(),
+                        OnSubmission = desired.OnSubmission,
+                        OnApproval = desired.OnApproval
+                    });
+                    continue;
+                }
+
+                match.OnSubmission = desired.OnSubmission;
+                match.OnApproval = desired.OnApproval;
+            }
+
+            var desiredWebhooksById = form.Webhooks.Where(w => !string.IsNullOrWhiteSpace(w.Url)).ToDictionary(w => w.Id);
+            foreach (var existingWebhook in existing.Webhooks.ToList())
+            {
+                if (!desiredWebhooksById.ContainsKey(existingWebhook.Id))
+                {
+                    db.FormWebhooks.Remove(existingWebhook);
+                }
+            }
+
+            foreach (var desired in desiredWebhooksById.Values)
+            {
+                var match = existing.Webhooks.FirstOrDefault(w => w.Id == desired.Id);
+                var triggerEventsJson = JsonSerializer.Serialize(desired.TriggerEvents);
+                var headersJson = JsonSerializer.Serialize(desired.Headers);
+
+                if (match is null)
+                {
+                    existing.Webhooks.Add(new FormWebhookEntity
+                    {
+                        Id = desired.Id,
+                        FormId = existing.Id,
+                        Url = desired.Url,
+                        Secret = desired.Secret,
+                        TriggerEventsJson = triggerEventsJson,
+                        HeadersJson = headersJson,
+                        IsEnabled = desired.IsEnabled
+                    });
+                    continue;
+                }
+
+                match.Url = desired.Url;
+                match.Secret = desired.Secret;
+                match.TriggerEventsJson = triggerEventsJson;
+                match.HeadersJson = headersJson;
+                match.IsEnabled = desired.IsEnabled;
+            }
+
+            try
+            {
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                logger.LogWarning(ex, "Concurrency conflict while saving form {FormId}.", form.Id);
+                throw new InvalidOperationException("The form was updated by another user. Reload and retry.", ex);
+            }
+            catch (DbUpdateException ex)
+            {
+                logger.LogError(ex, "Database update failed while saving form {FormId}.", form.Id);
+                throw new InvalidOperationException("The form could not be saved due to a database update failure.", ex);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        });
     }
 
     public async Task<IReadOnlyList<EntryRecord>> GetEntriesAsync(Guid? formId, string? search, CancellationToken cancellationToken = default)
@@ -945,213 +949,217 @@ internal sealed class EfFormsRepository : IFormsRepository
     public async Task SaveEntryAsync(EntryRecord entry, CancellationToken cancellationToken = default)
     {
         db.ChangeTracker.Clear();
-        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-
-        var existing = await db.Entries
-            .Include(e => e.Revisions)
-            .Include(e => e.ApprovalSteps)
-            .Include(e => e.Files)
-            .Include(e => e.SearchIndexEntries)
-            .AsSplitQuery()
-            .FirstOrDefaultAsync(e => e.Id == entry.Id, cancellationToken);
-
-        if (existing is null)
+        var strategy = db.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
         {
-            existing = new EntryEntity { Id = entry.Id };
-            db.Entries.Add(existing);
-        }
+            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
 
-        existing.FormId = entry.FormId;
-        existing.FormVersionId = entry.FormVersionId;
-        existing.SubmittedBy = entry.SubmittedBy;
-        existing.SubmittedByEmail = entry.SubmittedByEmail;
-        existing.SubmittedUtc = entry.SubmittedUtc;
-        existing.StartedUtc = entry.StartedUtc;
-        existing.Status = (int)entry.Status;
-        existing.Answers = new Dictionary<string, string?>(entry.Answers, StringComparer.OrdinalIgnoreCase);
-        existing.SearchIndex = new Dictionary<string, string>(entry.SearchIndex, StringComparer.OrdinalIgnoreCase);
-        existing.Score = entry.Score;
-        existing.QuizPassed = entry.QuizPassed;
+            var existing = await db.Entries
+                .Include(e => e.Revisions)
+                .Include(e => e.ApprovalSteps)
+                .Include(e => e.Files)
+                .Include(e => e.SearchIndexEntries)
+                .AsSplitQuery()
+                .FirstOrDefaultAsync(e => e.Id == entry.Id, cancellationToken);
 
-        var existingRevisionIds = existing.Revisions.Select(r => r.Id).ToHashSet();
-        foreach (var r in entry.Revisions)
-        {
-            if (existingRevisionIds.Contains(r.Id))
+            if (existing is null)
             {
-                continue;
+                existing = new EntryEntity { Id = entry.Id };
+                db.Entries.Add(existing);
             }
 
-            db.EntryRevisions.Add(new EntryRevisionEntity
-            {
-                Id = r.Id,
-                EntryId = existing.Id,
-                RevisionNumber = r.RevisionNumber,
-                EditedBy = r.EditedBy,
-                EditedUtc = r.EditedUtc,
-                Answers = new Dictionary<string, string?>(r.Answers, StringComparer.OrdinalIgnoreCase)
-            });
-        }
+            existing.FormId = entry.FormId;
+            existing.FormVersionId = entry.FormVersionId;
+            existing.SubmittedBy = entry.SubmittedBy;
+            existing.SubmittedByEmail = entry.SubmittedByEmail;
+            existing.SubmittedUtc = entry.SubmittedUtc;
+            existing.StartedUtc = entry.StartedUtc;
+            existing.Status = (int)entry.Status;
+            existing.Answers = new Dictionary<string, string?>(entry.Answers, StringComparer.OrdinalIgnoreCase);
+            existing.SearchIndex = new Dictionary<string, string>(entry.SearchIndex, StringComparer.OrdinalIgnoreCase);
+            existing.Score = entry.Score;
+            existing.QuizPassed = entry.QuizPassed;
 
-        var approvalStepsById = existing.ApprovalSteps.ToDictionary(a => a.Id);
-        foreach (var a in entry.ApprovalSteps)
-        {
-            if (!approvalStepsById.TryGetValue(a.Id, out var existingStep))
+            var existingRevisionIds = existing.Revisions.Select(r => r.Id).ToHashSet();
+            foreach (var r in entry.Revisions)
             {
-                existing.ApprovalSteps.Add(new ApprovalStepEntity
+                if (existingRevisionIds.Contains(r.Id))
                 {
-                    Id = a.Id,
-                    Order = a.Order,
-                    ApproverId = a.ApproverId,
-                    ApproverName = a.ApproverName,
-                    ApproverEmail = a.ApproverEmail,
-                    AcceptorMode = (int)a.AcceptorMode,
-                    AcceptorsJson = JsonSerializer.Serialize(a.Acceptors),
-                    Instructions = a.Instructions,
-                    Status = (int)a.Status,
-                    Signature = a.Signature,
-                    RejectionReason = a.RejectionReason,
-                    CompletedUtc = a.CompletedUtc,
-                    DelegatedToEmail = a.DelegatedToEmail,
-                    DelegatedToName = a.DelegatedToName,
-                    DelegatedUtc = a.DelegatedUtc
-                });
-                continue;
-            }
+                    continue;
+                }
 
-            existingStep.Order = a.Order;
-            existingStep.ApproverId = a.ApproverId;
-            existingStep.ApproverName = a.ApproverName;
-            existingStep.ApproverEmail = a.ApproverEmail;
-            existingStep.AcceptorMode = (int)a.AcceptorMode;
-            existingStep.AcceptorsJson = JsonSerializer.Serialize(a.Acceptors);
-            existingStep.Instructions = a.Instructions;
-            existingStep.Status = (int)a.Status;
-            existingStep.Signature = a.Signature;
-            existingStep.RejectionReason = a.RejectionReason;
-            existingStep.CompletedUtc = a.CompletedUtc;
-            existingStep.DelegatedToEmail = a.DelegatedToEmail;
-            existingStep.DelegatedToName = a.DelegatedToName;
-            existingStep.DelegatedUtc = a.DelegatedUtc;
-        }
-
-        foreach (var existingStep in existing.ApprovalSteps.ToList())
-        {
-            if (entry.ApprovalSteps.All(a => a.Id != existingStep.Id))
-            {
-                db.ApprovalSteps.Remove(existingStep);
-            }
-        }
-
-        var existingAuditIds = await db.ApprovalAuditEvents
-            .AsNoTracking()
-            .Where(a => a.EntryId == existing.Id)
-            .Select(a => a.Id)
-            .ToHashSetAsync(cancellationToken);
-        foreach (var audit in entry.ApprovalAuditTrail.OrderBy(a => a.OccurredUtc))
-        {
-            if (existingAuditIds.Contains(audit.Id))
-            {
-                continue;
-            }
-
-            db.ApprovalAuditEvents.Add(new ApprovalAuditEventEntity
-            {
-                Id = audit.Id,
-                EntryId = existing.Id,
-                Action = (int)audit.Action,
-                ApprovalStepId = audit.ApprovalStepId,
-                ActorUserId = audit.ActorUserId,
-                ActorDisplayName = audit.ActorDisplayName,
-                Signature = audit.Signature,
-                Reason = audit.Reason,
-                CorrelationId = audit.CorrelationId,
-                OccurredUtc = audit.OccurredUtc
-            });
-        }
-
-        var existingSearchByKey = existing.SearchIndexEntries.ToDictionary(s => s.Key, StringComparer.OrdinalIgnoreCase);
-        foreach (var kv in entry.SearchIndex)
-        {
-            if (existingSearchByKey.TryGetValue(kv.Key, out var searchEntity))
-            {
-                searchEntity.Value = kv.Value ?? string.Empty;
-                continue;
-            }
-
-            existing.SearchIndexEntries.Add(new EntrySearchIndexEntity
-            {
-                Id = Guid.NewGuid(),
-                Key = kv.Key,
-                Value = kv.Value ?? string.Empty
-            });
-        }
-
-        foreach (var existingSearch in existing.SearchIndexEntries.ToList())
-        {
-            if (!entry.SearchIndex.ContainsKey(existingSearch.Key))
-            {
-                db.EntrySearchIndex.Remove(existingSearch);
-            }
-        }
-
-        var filesById = existing.Files.ToDictionary(f => f.Id);
-        foreach (var file in entry.Files)
-        {
-            if (!filesById.TryGetValue(file.Id, out var existingFile))
-            {
-                existing.Files.Add(new EntryFileMetadataEntity
+                db.EntryRevisions.Add(new EntryRevisionEntity
                 {
-                    Id = file.Id,
-                    FieldId = file.FieldId,
-                    FileName = file.FileName,
-                    ContentType = file.ContentType,
-                    Length = file.Length,
-                    RelativePath = file.RelativePath,
-                    Sha256 = file.Sha256,
-                    UploadedByUserId = file.UploadedByUserId,
-                    UploadedByEmail = file.UploadedByEmail,
-                    RevisionNumber = file.RevisionNumber,
-                    UploadedUtc = file.UploadedUtc
+                    Id = r.Id,
+                    EntryId = existing.Id,
+                    RevisionNumber = r.RevisionNumber,
+                    EditedBy = r.EditedBy,
+                    EditedUtc = r.EditedUtc,
+                    Answers = new Dictionary<string, string?>(r.Answers, StringComparer.OrdinalIgnoreCase)
                 });
-                continue;
             }
 
-            existingFile.FieldId = file.FieldId;
-            existingFile.FileName = file.FileName;
-            existingFile.ContentType = file.ContentType;
-            existingFile.Length = file.Length;
-            existingFile.RelativePath = file.RelativePath;
-            existingFile.Sha256 = file.Sha256;
-            existingFile.UploadedByUserId = file.UploadedByUserId;
-            existingFile.UploadedByEmail = file.UploadedByEmail;
-            existingFile.RevisionNumber = file.RevisionNumber;
-            existingFile.UploadedUtc = file.UploadedUtc;
-        }
-
-        foreach (var existingFile in existing.Files.ToList())
-        {
-            if (entry.Files.All(f => f.Id != existingFile.Id))
+            var approvalStepsById = existing.ApprovalSteps.ToDictionary(a => a.Id);
+            foreach (var a in entry.ApprovalSteps)
             {
-                db.EntryFiles.Remove(existingFile);
+                if (!approvalStepsById.TryGetValue(a.Id, out var existingStep))
+                {
+                    existing.ApprovalSteps.Add(new ApprovalStepEntity
+                    {
+                        Id = a.Id,
+                        Order = a.Order,
+                        ApproverId = a.ApproverId,
+                        ApproverName = a.ApproverName,
+                        ApproverEmail = a.ApproverEmail,
+                        AcceptorMode = (int)a.AcceptorMode,
+                        AcceptorsJson = JsonSerializer.Serialize(a.Acceptors),
+                        Instructions = a.Instructions,
+                        Status = (int)a.Status,
+                        Signature = a.Signature,
+                        RejectionReason = a.RejectionReason,
+                        CompletedUtc = a.CompletedUtc,
+                        DelegatedToEmail = a.DelegatedToEmail,
+                        DelegatedToName = a.DelegatedToName,
+                        DelegatedUtc = a.DelegatedUtc
+                    });
+                    continue;
+                }
+
+                existingStep.Order = a.Order;
+                existingStep.ApproverId = a.ApproverId;
+                existingStep.ApproverName = a.ApproverName;
+                existingStep.ApproverEmail = a.ApproverEmail;
+                existingStep.AcceptorMode = (int)a.AcceptorMode;
+                existingStep.AcceptorsJson = JsonSerializer.Serialize(a.Acceptors);
+                existingStep.Instructions = a.Instructions;
+                existingStep.Status = (int)a.Status;
+                existingStep.Signature = a.Signature;
+                existingStep.RejectionReason = a.RejectionReason;
+                existingStep.CompletedUtc = a.CompletedUtc;
+                existingStep.DelegatedToEmail = a.DelegatedToEmail;
+                existingStep.DelegatedToName = a.DelegatedToName;
+                existingStep.DelegatedUtc = a.DelegatedUtc;
             }
-        }
 
-        try
-        {
-            await db.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateConcurrencyException ex)
-        {
-            logger.LogWarning(ex, "Concurrency conflict while saving entry {EntryId}.", entry.Id);
-            throw new InvalidOperationException("The entry was updated by another user. Reload and retry.", ex);
-        }
-        catch (DbUpdateException ex)
-        {
-            logger.LogError(ex, "Database update failed while saving entry {EntryId}.", entry.Id);
-            throw new InvalidOperationException("The entry could not be saved due to a database update failure.", ex);
-        }
+            foreach (var existingStep in existing.ApprovalSteps.ToList())
+            {
+                if (entry.ApprovalSteps.All(a => a.Id != existingStep.Id))
+                {
+                    db.ApprovalSteps.Remove(existingStep);
+                }
+            }
 
-        await transaction.CommitAsync(cancellationToken);
+            var existingAuditIds = await db.ApprovalAuditEvents
+                .AsNoTracking()
+                .Where(a => a.EntryId == existing.Id)
+                .Select(a => a.Id)
+                .ToHashSetAsync(cancellationToken);
+            foreach (var audit in entry.ApprovalAuditTrail.OrderBy(a => a.OccurredUtc))
+            {
+                if (existingAuditIds.Contains(audit.Id))
+                {
+                    continue;
+                }
+
+                db.ApprovalAuditEvents.Add(new ApprovalAuditEventEntity
+                {
+                    Id = audit.Id,
+                    EntryId = existing.Id,
+                    Action = (int)audit.Action,
+                    ApprovalStepId = audit.ApprovalStepId,
+                    ActorUserId = audit.ActorUserId,
+                    ActorDisplayName = audit.ActorDisplayName,
+                    Signature = audit.Signature,
+                    Reason = audit.Reason,
+                    CorrelationId = audit.CorrelationId,
+                    OccurredUtc = audit.OccurredUtc
+                });
+            }
+
+            var existingSearchByKey = existing.SearchIndexEntries.ToDictionary(s => s.Key, StringComparer.OrdinalIgnoreCase);
+            foreach (var kv in entry.SearchIndex)
+            {
+                if (existingSearchByKey.TryGetValue(kv.Key, out var searchEntity))
+                {
+                    searchEntity.Value = kv.Value ?? string.Empty;
+                    continue;
+                }
+
+                existing.SearchIndexEntries.Add(new EntrySearchIndexEntity
+                {
+                    Id = Guid.NewGuid(),
+                    Key = kv.Key,
+                    Value = kv.Value ?? string.Empty
+                });
+            }
+
+            foreach (var existingSearch in existing.SearchIndexEntries.ToList())
+            {
+                if (!entry.SearchIndex.ContainsKey(existingSearch.Key))
+                {
+                    db.EntrySearchIndex.Remove(existingSearch);
+                }
+            }
+
+            var filesById = existing.Files.ToDictionary(f => f.Id);
+            foreach (var file in entry.Files)
+            {
+                if (!filesById.TryGetValue(file.Id, out var existingFile))
+                {
+                    existing.Files.Add(new EntryFileMetadataEntity
+                    {
+                        Id = file.Id,
+                        FieldId = file.FieldId,
+                        FileName = file.FileName,
+                        ContentType = file.ContentType,
+                        Length = file.Length,
+                        RelativePath = file.RelativePath,
+                        Sha256 = file.Sha256,
+                        UploadedByUserId = file.UploadedByUserId,
+                        UploadedByEmail = file.UploadedByEmail,
+                        RevisionNumber = file.RevisionNumber,
+                        UploadedUtc = file.UploadedUtc
+                    });
+                    continue;
+                }
+
+                existingFile.FieldId = file.FieldId;
+                existingFile.FileName = file.FileName;
+                existingFile.ContentType = file.ContentType;
+                existingFile.Length = file.Length;
+                existingFile.RelativePath = file.RelativePath;
+                existingFile.Sha256 = file.Sha256;
+                existingFile.UploadedByUserId = file.UploadedByUserId;
+                existingFile.UploadedByEmail = file.UploadedByEmail;
+                existingFile.RevisionNumber = file.RevisionNumber;
+                existingFile.UploadedUtc = file.UploadedUtc;
+            }
+
+            foreach (var existingFile in existing.Files.ToList())
+            {
+                if (entry.Files.All(f => f.Id != existingFile.Id))
+                {
+                    db.EntryFiles.Remove(existingFile);
+                }
+            }
+
+            try
+            {
+                await db.SaveChangesAsync(cancellationToken);
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                logger.LogWarning(ex, "Concurrency conflict while saving entry {EntryId}.", entry.Id);
+                throw new InvalidOperationException("The entry was updated by another user. Reload and retry.", ex);
+            }
+            catch (DbUpdateException ex)
+            {
+                logger.LogError(ex, "Database update failed while saving entry {EntryId}.", entry.Id);
+                throw new InvalidOperationException("The entry could not be saved due to a database update failure.", ex);
+            }
+
+            await transaction.CommitAsync(cancellationToken);
+        });
     }
 
     public async Task<IReadOnlyList<EntryFileRecord>> GetOrphanedFilesAsync(DateTimeOffset olderThanUtc, CancellationToken cancellationToken = default)

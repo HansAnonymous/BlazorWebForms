@@ -102,6 +102,14 @@ public sealed class FormFieldDefinition
     public List<string> AllowedMimeTypes { get; set; } = [];
     public List<string> AllowedExtensions { get; set; } = [];
     public List<FormFieldOption> Options { get; set; } = [];
+    /// <summary>Matrix rows displayed when Kind is MatrixSingle or MatrixMulti.</summary>
+    public List<MatrixRowDefinition> MatrixRows { get; set; } = [];
+    /// <summary>Matrix columns displayed when Kind is MatrixSingle or MatrixMulti.</summary>
+    public List<MatrixColumnDefinition> MatrixColumns { get; set; } = [];
+    /// <summary>When true, the same matrix column cannot be selected more than once across all rows.</summary>
+    public bool MatrixLimitOneResponsePerColumn { get; set; }
+    /// <summary>When true, matrix rows are shuffled for each rendered session.</summary>
+    public bool MatrixShuffleRowOrder { get; set; }
     public string CustomKind { get; set; } = string.Empty;
     public Dictionary<string, string> Metadata { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
@@ -165,6 +173,20 @@ public sealed class FormFieldOption
     public decimal? Points { get; set; }
     /// <summary>When true, this is the designated correct answer in quiz mode. Affects automatic score evaluation.</summary>
     public bool IsCorrectAnswer { get; set; }
+}
+
+public sealed class MatrixRowDefinition
+{
+    public string Id { get; set; } = $"row-{Guid.NewGuid():N}";
+    public string Label { get; set; } = "Row";
+    public Dictionary<string, string> LocalizedLabels { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+public sealed class MatrixColumnDefinition
+{
+    public string Value { get; set; } = string.Empty;
+    public string Label { get; set; } = string.Empty;
+    public Dictionary<string, string> LocalizedLabels { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed class RepeatableListColumnDefinition

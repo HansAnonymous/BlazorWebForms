@@ -228,3 +228,20 @@ public enum FormAnalyticsEvent
     Submission,
     Abandon
 }
+
+/// <summary>Result of a test webhook delivery triggered via <c>SendTestWebhookAsync</c>.</summary>
+public sealed class WebhookTestResult
+{
+    /// <summary>The webhook definition the test delivery was sent to.</summary>
+    public required Guid WebhookId { get; init; }
+    /// <summary>The target URL the test POST was sent to.</summary>
+    public required string Url { get; init; }
+    /// <summary>True when the endpoint returned a 2xx status code.</summary>
+    public bool Success { get; init; }
+    /// <summary>HTTP status code returned by the endpoint, or <c>null</c> when the request did not complete.</summary>
+    public int? HttpStatusCode { get; init; }
+    /// <summary>Error message when <see cref="Success"/> is false, otherwise empty.</summary>
+    public string ErrorMessage { get; init; } = string.Empty;
+    /// <summary>Round-trip latency of the HTTP call.</summary>
+    public TimeSpan Elapsed { get; init; }
+}

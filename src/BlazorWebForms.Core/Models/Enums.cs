@@ -20,7 +20,11 @@ public enum FormFieldKind
     /// <summary>Value is stored with the entry but not shown to the submitter on the rendered form.</summary>
     Hidden,
     /// <summary>Presents a search input backed by an external URL; selected value is stored as a string.</summary>
-    Lookup
+    Lookup,
+    /// <summary>Matrix/grid where each row accepts a single selection from the configured columns.</summary>
+    MatrixSingle,
+    /// <summary>Matrix/grid where each row accepts multiple selections from the configured columns.</summary>
+    MatrixMulti
 }
 
 public enum NumberDisplayKind
@@ -111,7 +115,8 @@ public enum VisibilityRuleOperator
     StartsWith,
     EndsWith,
     GreaterThan,
-    LessThan
+    LessThan,
+    NotContains
 }
 
 public enum WebhookTriggerEvent

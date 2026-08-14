@@ -85,6 +85,45 @@ Assert(!conditionEvaluator.IsVisible(fieldRules, new Dictionary<string, string?>
     ["notes"] = "has text"
 }), "Structured OR rules evaluate hidden when no rules pass.");
 
+var doesNotContainRules = new VisibilityConditionDefinition
+{
+    Join = VisibilityJoinOperator.And,
+    Rules =
+    [
+        new VisibilityRuleDefinition { FieldId = "comment", Operator = VisibilityRuleOperator.NotContains, Value = "urgent" }
+    ]
+};
+Assert(conditionEvaluator.IsVisible(doesNotContainRules, new Dictionary<string, string?> { ["comment"] = "routine follow-up" }), "NotContains rule evaluates visible when value does not include expected text.");
+Assert(!conditionEvaluator.IsVisible(doesNotContainRules, new Dictionary<string, string?> { ["comment"] = "urgent escalation" }), "NotContains rule evaluates hidden when value includes expected text.");
+
+var rankedContainsRule = new VisibilityConditionDefinition
+{
+    Join = VisibilityJoinOperator.And,
+    Rules =
+    [
+        new VisibilityRuleDefinition { FieldId = "topPicks", Operator = VisibilityRuleOperator.Contains, Value = "blue" }
+    ]
+};
+Assert(conditionEvaluator.IsVisible(rankedContainsRule, new Dictionary<string, string?> { ["topPicks"] = "[\"green\",\"blue\",\"red\"]" }), "Contains evaluates true when any ranked choice item contains the expected text.");
+
+var rankedCrossBoundaryRule = new VisibilityConditionDefinition
+{
+    Join = VisibilityJoinOperator.And,
+    Rules =
+    [
+        new VisibilityRuleDefinition { FieldId = "topPicks", Operator = VisibilityRuleOperator.Contains, Value = "een\",\"bl" }
+    ]
+};
+Assert(!conditionEvaluator.IsVisible(rankedCrossBoundaryRule, new Dictionary<string, string?> { ["topPicks"] = "[\"green\",\"blue\",\"red\"]" }), "Contains evaluates per ranked choice item and does not match across serialized item boundaries.");
+Assert(conditionEvaluator.IsVisible(new VisibilityConditionDefinition
+{
+    Join = VisibilityJoinOperator.And,
+    Rules =
+    [
+        new VisibilityRuleDefinition { FieldId = "topPicks", Operator = VisibilityRuleOperator.NotContains, Value = "een\",\"bl" }
+    ]
+}, new Dictionary<string, string?> { ["topPicks"] = "[\"green\",\"blue\",\"red\"]" }), "NotContains evaluates per ranked choice item and allows cross-boundary text that is not in any single choice.");
+
 var renderDefinition = new FormDefinition
 {
     Title = "Render visibility test",
@@ -1091,6 +1130,77 @@ var rankedField = rankedRoundTrip.Sections[0].Fields[0];
 Assert(rankedField.Kind == FormFieldKind.RankedChoice, "RankedChoice kind round-trips through serializer.");
 Assert(rankedField.RankCount == 3, "RankCount value round-trips through serializer.");
 Assert(rankedField.Options.Count == 5, "RankedChoice options round-trip through serializer.");
+
+var matrixForm = await app.SaveDraftAsync(new SaveDraftRequest
+{
+    Name = "Matrix form",
+    Description = "Test matrix field kinds",
+    Slug = $"matrix-{Guid.NewGuid():N}",
+    AccessMode = FormAccessMode.Public,
+    Definition = new FormDefinition
+    {
+        Title = "Matrix form",
+        Sections =
+        [
+            new FormSectionDefinition
+            {
+                Id = "matrix-section",
+                Title = "Matrix questions",
+                Fields =
+                [
+                    new FormFieldDefinition
+                    {
+                        Id = "satisfaction",
+                        Kind = FormFieldKind.MatrixSingle,
+                        Label = "Rate each area",
+                        MatrixRows =
+                        [
+                            new MatrixRowDefinition { Id = "usability", Label = "Usability" },
+                            new MatrixRowDefinition { Id = "support", Label = "Support" }
+                        ],
+                        MatrixColumns =
+                        [
+                            new MatrixColumnDefinition { Value = "good", Label = "Good" },
+                            new MatrixColumnDefinition { Value = "bad", Label = "Bad" }
+                        ]
+                    },
+                    new FormFieldDefinition
+                    {
+                        Id = "skills",
+                        Kind = FormFieldKind.MatrixMulti,
+                        Label = "Select skills by project",
+                        MatrixLimitOneResponsePerColumn = true,
+                        MatrixShuffleRowOrder = true,
+                        MatrixRows =
+                        [
+                            new MatrixRowDefinition { Id = "projectA", Label = "Project A" },
+                            new MatrixRowDefinition { Id = "projectB", Label = "Project B" }
+                        ],
+                        MatrixColumns =
+                        [
+                            new MatrixColumnDefinition { Value = "csharp", Label = "C#" },
+                            new MatrixColumnDefinition { Value = "sql", Label = "SQL" },
+                            new MatrixColumnDefinition { Value = "azure", Label = "Azure" }
+                        ]
+                    }
+                ]
+            }
+        ]
+    }
+});
+
+var matrixVersion = await app.PublishAsync(matrixForm.Id);
+Assert(matrixVersion.VersionNumber == 1, "Matrix form publishes successfully.");
+
+var matrixDefinitionJson = serializer.Serialize(matrixForm.DraftDefinition);
+var matrixRoundTrip = serializer.Deserialize(matrixDefinitionJson);
+var singleMatrixField = matrixRoundTrip.Sections[0].Fields.Single(f => f.Id == "satisfaction");
+var multiMatrixField = matrixRoundTrip.Sections[0].Fields.Single(f => f.Id == "skills");
+Assert(singleMatrixField.Kind == FormFieldKind.MatrixSingle, "MatrixSingle kind round-trips through serializer.");
+Assert(singleMatrixField.MatrixRows.Count == 2 && singleMatrixField.MatrixColumns.Count == 2, "MatrixSingle rows and columns round-trip through serializer.");
+Assert(multiMatrixField.Kind == FormFieldKind.MatrixMulti, "MatrixMulti kind round-trips through serializer.");
+Assert(multiMatrixField.MatrixLimitOneResponsePerColumn, "Matrix limit-one-response-per-column option round-trips through serializer.");
+Assert(multiMatrixField.MatrixShuffleRowOrder, "Matrix shuffle-row-order option round-trips through serializer.");
 
 // ── RepeatableList multi-attribute columns round-trip ─────────────────────────
 

@@ -125,14 +125,14 @@ public sealed class FormsApplicationService(
         ValidateLocalizationPayload(request.Definition);
         form.DraftDefinition = request.Definition;
         form.UpdatedUtc = DateTimeOffset.UtcNow;
-        form.Notifications = request.NotificationEmails
-            .Where(email => !string.IsNullOrWhiteSpace(email))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .Select(email => new FormNotificationRule { Email = email.Trim() })
-            .ToList();
-        form.Webhooks = request.Webhooks
-            .Where(w => !string.IsNullOrWhiteSpace(w.Url))
-            .ToList();
+        form.Notifications.Clear();
+        foreach (var n in request.NotificationEmails.Where(em => !string.IsNullOrWhiteSpace(em))
+            .Distinct(StringComparer.OrdinalIgnoreCase))
+            form.Notifications.Add(new FormNotificationRule { Email = n.Trim() });
+
+        form.Webhooks.Clear();
+        foreach (var w in request.Webhooks.Where(w => !string.IsNullOrWhiteSpace(w.Url)))
+            form.Webhooks.Add(w);
 
         if (!form.Permissions.Any())
         {
@@ -819,6 +819,26 @@ public sealed class FormsApplicationService(
         return sent;
     }
 
+    /// <summary>
+    /// Sends a test delivery to a single webhook on the specified form and returns the result.
+    /// The caller must be a manager or admin for the form.
+    /// </summary>
+    public async Task<WebhookTestResult> SendTestWebhookAsync(Guid formId, Guid webhookId, CancellationToken cancellationToken = default)
+    {
+        var form = await repository.GetFormAsync(formId, cancellationToken)
+                   ?? throw new InvalidOperationException("Form not found.");
+        var user = currentUserContext.GetCurrentUser();
+        if (!permissionEvaluator.CanManageForm(form, user) && !user.Roles.Contains(FormPermissionRole.Admin))
+        {
+            throw new InvalidOperationException("Current user cannot send test webhooks for this form.");
+        }
+
+        var webhook = form.Webhooks.FirstOrDefault(w => w.Id == webhookId)
+                      ?? throw new InvalidOperationException($"Webhook {webhookId} not found on form {formId}.");
+
+        return await webhookDispatcher.SendTestDeliveryAsync(form, webhook, cancellationToken);
+    }
+
     public Task<IReadOnlyList<EntryRecord>> SearchEntriesAsync(Guid? formId, string? search, CancellationToken cancellationToken = default) =>
         repository.GetEntriesAsync(formId, search, cancellationToken);
 
@@ -1426,6 +1446,57 @@ public sealed class FormsApplicationService(
                     }
                 }
 
+                if (field.Kind is FormFieldKind.MatrixSingle or FormFieldKind.MatrixMulti)
+                {
+                    if (field.MatrixRows.Count == 0)
+                    {
+                        throw new InvalidOperationException($"Field '{field.Label}' must define at least one matrix row.");
+                    }
+
+                    if (field.MatrixColumns.Count == 0)
+                    {
+                        throw new InvalidOperationException($"Field '{field.Label}' must define at least one matrix column.");
+                    }
+
+                    var rowIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var row in field.MatrixRows)
+                    {
+                        if (string.IsNullOrWhiteSpace(row.Id))
+                        {
+                            throw new InvalidOperationException($"Field '{field.Label}' includes a matrix row with empty id.");
+                        }
+
+                        if (!rowIds.Add(row.Id))
+                        {
+                            throw new InvalidOperationException($"Field '{field.Label}' contains duplicate matrix row ids.");
+                        }
+
+                        if (string.IsNullOrWhiteSpace(row.Label))
+                        {
+                            throw new InvalidOperationException($"Field '{field.Label}' row '{row.Id}' must have a label.");
+                        }
+                    }
+
+                    var columnValues = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var column in field.MatrixColumns)
+                    {
+                        if (string.IsNullOrWhiteSpace(column.Value))
+                        {
+                            throw new InvalidOperationException($"Field '{field.Label}' includes a matrix column with empty value.");
+                        }
+
+                        if (!columnValues.Add(column.Value))
+                        {
+                            throw new InvalidOperationException($"Field '{field.Label}' contains duplicate matrix column values.");
+                        }
+
+                        if (string.IsNullOrWhiteSpace(column.Label))
+                        {
+                            throw new InvalidOperationException($"Field '{field.Label}' matrix column '{column.Value}' must have a label.");
+                        }
+                    }
+                }
+
                 if (field.Kind == FormFieldKind.Custom)
                 {
                     if (string.IsNullOrWhiteSpace(field.CustomKind))
@@ -1492,6 +1563,16 @@ public sealed class FormsApplicationService(
                 foreach (var option in field.Options)
                 {
                     ValidateLocalizationMap(option.LocalizedLabels, $"Field '{field.Label}' option '{option.Value}' localized labels");
+                }
+
+                foreach (var matrixRow in field.MatrixRows)
+                {
+                    ValidateLocalizationMap(matrixRow.LocalizedLabels, $"Field '{field.Label}' matrix row '{matrixRow.Id}' localized labels");
+                }
+
+                foreach (var matrixColumn in field.MatrixColumns)
+                {
+                    ValidateLocalizationMap(matrixColumn.LocalizedLabels, $"Field '{field.Label}' matrix column '{matrixColumn.Value}' localized labels");
                 }
 
                 foreach (var column in field.RepeatableColumns)

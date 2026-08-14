@@ -103,7 +103,10 @@ internal sealed class SimpleConditionEvaluator : IConditionEvaluator
         {
             VisibilityRuleOperator.Equals => hasValue && string.Equals(normalizedActual, normalizedExpected, StringComparison.OrdinalIgnoreCase),
             VisibilityRuleOperator.NotEquals => !hasValue || !string.Equals(normalizedActual, normalizedExpected, StringComparison.OrdinalIgnoreCase),
-            VisibilityRuleOperator.Contains => hasValue && normalizedActual.Contains(normalizedExpected, StringComparison.OrdinalIgnoreCase),
+            VisibilityRuleOperator.Contains => hasValue && GetContainsCandidates(normalizedActual)
+                .Any(candidate => candidate.Contains(normalizedExpected, StringComparison.OrdinalIgnoreCase)),
+            VisibilityRuleOperator.NotContains => !hasValue || GetContainsCandidates(normalizedActual)
+                .All(candidate => !candidate.Contains(normalizedExpected, StringComparison.OrdinalIgnoreCase)),
             VisibilityRuleOperator.Empty => !hasValue || string.IsNullOrWhiteSpace(normalizedActual),
             VisibilityRuleOperator.NotEmpty => hasValue && !string.IsNullOrWhiteSpace(normalizedActual),
             VisibilityRuleOperator.StartsWith => hasValue && normalizedActual.StartsWith(normalizedExpected, StringComparison.OrdinalIgnoreCase),
@@ -116,6 +119,52 @@ internal sealed class SimpleConditionEvaluator : IConditionEvaluator
                                                ltActual < ltExpected,
             _ => true
         };
+    }
+
+    private static IReadOnlyList<string> GetContainsCandidates(string actual)
+    {
+        if (TryParseStringArray(actual, out var arrayValues))
+        {
+            return arrayValues;
+        }
+
+        if (actual.Contains(',', StringComparison.Ordinal))
+        {
+            return actual.Split(',', StringSplitOptions.TrimEntries);
+        }
+
+        return [actual];
+    }
+
+    private static bool TryParseStringArray(string value, out IReadOnlyList<string> parsed)
+    {
+        parsed = [];
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        var trimmed = value.Trim();
+        if (!trimmed.StartsWith('[') || !trimmed.EndsWith(']'))
+        {
+            return false;
+        }
+
+        try
+        {
+            var values = JsonSerializer.Deserialize<List<string>>(trimmed);
+            if (values is null)
+            {
+                return false;
+            }
+
+            parsed = values;
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 }
 
@@ -153,6 +202,15 @@ internal sealed class NoOpWebhookDispatcher : IWebhookDispatcher
 {
     public Task DispatchAsync(FormAggregate form, WebhookTriggerEvent triggerEvent, EntryRecord entry, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
+
+    public Task<WebhookTestResult> SendTestDeliveryAsync(FormAggregate form, FormWebhookDefinition webhook, CancellationToken cancellationToken = default) =>
+        Task.FromResult(new WebhookTestResult
+        {
+            WebhookId = webhook.Id,
+            Url = webhook.Url,
+            Success = false,
+            ErrorMessage = "No webhook dispatcher is registered. Replace IWebhookDispatcher via DI to enable real deliveries."
+        });
 }
 
 /// <summary>
@@ -317,6 +375,10 @@ public static class ResponsePipeHelper
                     AllowedMimeTypes = field.AllowedMimeTypes,
                     AllowedExtensions = field.AllowedExtensions,
                     Options = field.Options,
+                    MatrixRows = field.MatrixRows,
+                    MatrixColumns = field.MatrixColumns,
+                    MatrixLimitOneResponsePerColumn = field.MatrixLimitOneResponsePerColumn,
+                    MatrixShuffleRowOrder = field.MatrixShuffleRowOrder,
                     CustomKind = field.CustomKind,
                     Metadata = field.Metadata,
                     MaxLength = field.MaxLength,
