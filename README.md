@@ -6,6 +6,7 @@ Define forms as data, collect submissions, run approval workflows, and export re
 [![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue)](LICENSE)
 [![.NET 10](https://img.shields.io/badge/.NET-10-purple)](https://dotnet.microsoft.com)
 [![NuGet](https://img.shields.io/nuget/v/BlazorWebForms.Core)](https://www.nuget.org/packages/BlazorWebForms.Core)
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/HansAnonymous/BlazorWebForms)
 
 ---
 
