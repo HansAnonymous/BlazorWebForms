@@ -802,16 +802,21 @@ internal sealed class EfFormsRepository : IFormsRepository
 
                 if (match is null)
                 {
-                    existing.Webhooks.Add(new FormWebhookEntity
+                    var newWebhook = new FormWebhookEntity
                     {
-                        Id = desired.Id,
+                        Id = desired.Id == Guid.Empty ? Guid.NewGuid() : desired.Id,
                         FormId = existing.Id,
                         Url = desired.Url,
                         Secret = desired.Secret,
                         TriggerEventsJson = triggerEventsJson,
                         HeadersJson = headersJson,
                         IsEnabled = desired.IsEnabled
-                    });
+                    };
+                
+                    existing.Webhooks.Add(newWebhook);
+                    
+                    // Explicitly enforce Added state so EF Core generates an INSERT statement:
+                    db.Entry(newWebhook).State = EntityState.Added;
                     continue;
                 }
 
