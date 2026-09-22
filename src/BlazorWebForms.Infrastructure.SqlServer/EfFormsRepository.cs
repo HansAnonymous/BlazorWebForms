@@ -806,20 +806,25 @@ internal sealed class EfFormsRepository : IFormsRepository
                         var triggerEventsJson = JsonSerializer.Serialize(desired.TriggerEvents);
                         var headersJson = JsonSerializer.Serialize(desired.Headers);
 
-                        if (match is null)
-                        {
-                            db.FormWebhooks.Add(new FormWebhookEntity
-                            {
-                                Id = desired.Id,
-                                FormId = existing.Id,
-                                Url = desired.Url,
-                                Secret = desired.Secret,
-                                TriggerEventsJson = triggerEventsJson,
-                                HeadersJson = headersJson,
-                                IsEnabled = desired.IsEnabled
-                            });
-                            continue;
-                        }
+                if (match is null)
+                {
+                    var newWebhook = new FormWebhookEntity
+                    {
+                        Id = desired.Id == Guid.Empty ? Guid.NewGuid() : desired.Id,
+                        FormId = existing.Id,
+                        Url = desired.Url,
+                        Secret = desired.Secret,
+                        TriggerEventsJson = triggerEventsJson,
+                        HeadersJson = headersJson,
+                        IsEnabled = desired.IsEnabled
+                    };
+                
+                    existing.Webhooks.Add(newWebhook);
+                    
+                    // Explicitly enforce Added state so EF Core generates an INSERT statement:
+                    db.Entry(newWebhook).State = EntityState.Added;
+                    continue;
+                }
 
                         match.Url = desired.Url;
                         match.Secret = desired.Secret;
