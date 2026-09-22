@@ -103,10 +103,14 @@ public interface IPermissionEvaluator
 public interface IFormsRepository
 {
     Task SeedAsync(CancellationToken cancellationToken = default);
-    Task<IReadOnlyList<FormAggregate>> GetFormsAsync(CancellationToken cancellationToken = default);
-    Task<FormAggregate?> GetFormAsync(Guid formId, CancellationToken cancellationToken = default);
-    Task<FormAggregate?> GetFormBySlugAsync(string slug, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<FormAggregate>> GetFormsAsync(CancellationToken cancellationToken = default, bool includeArchived = false);
+    Task<FormAggregate?> GetFormAsync(Guid formId, CancellationToken cancellationToken = default, bool includeArchived = false);
+    Task<FormAggregate?> GetFormBySlugAsync(string slug, CancellationToken cancellationToken = default, bool includeArchived = false);
     Task SaveFormAsync(FormAggregate form, CancellationToken cancellationToken = default);
+    Task ArchiveFormAsync(Guid formId, Guid archivedByUserId, DateTimeOffset archivedUtc, CancellationToken cancellationToken = default);
+    Task RestoreFormAsync(Guid formId, CancellationToken cancellationToken = default);
+    Task DeleteFormAsync(Guid formId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<StoredFile>> GetStoredFilesAsync(Guid formId, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<EntryRecord>> GetEntriesAsync(Guid? formId, string? search, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<EntryRecord>> QueryEntriesAsync(EntryQueryOptions options, CancellationToken cancellationToken = default);
     Task<EntryRecord?> GetEntryAsync(Guid entryId, CancellationToken cancellationToken = default);

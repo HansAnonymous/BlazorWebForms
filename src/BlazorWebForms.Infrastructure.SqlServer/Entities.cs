@@ -1,19 +1,26 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel.DataAnnotations;
 
 namespace BlazorWebForms.Infrastructure.SqlServer;
 
 public class FormEntity
 {
-    public Guid Id { get; set; }
+    public Guid Id { get; init; }
+    [MaxLength(100)]
     public string Key { get; set; } = string.Empty;
+    [MaxLength(100)]
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public Guid OwnerUserId { get; set; }
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? ArchivedUtc { get; set; }
+    public Guid? ArchivedByUserId { get; set; }
     public string? DraftDefinitionJson { get; set; }
+    [MaxLength(50)]
     public string PublicationSlug { get; set; } = string.Empty;
+    [MaxLength(40)]
     public string PublicationDomain { get; set; } = string.Empty;
     public int PublicationAccessMode { get; set; }
     public bool PublicationSendSubmissionCopyToSubmitter { get; set; }
@@ -29,7 +36,7 @@ public class FormEntity
     public string PublicationAccessPasswordHash { get; set; } = string.Empty;
     public bool PublicationRequireCaptcha { get; set; }
     public int? PublicationAutoSaveIntervalSeconds { get; set; }
-    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+    public byte[] RowVersion { get; init; } = Array.Empty<byte>();
 
     public ICollection<FormVersionEntity> Versions { get; set; } = new List<FormVersionEntity>();
     public ICollection<FormPermissionEntity> Permissions { get; set; } = new List<FormPermissionEntity>();

@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using BlazorWebForms.Core.Abstractions;
 using BlazorWebForms.Core.Models;
@@ -87,14 +89,14 @@ internal sealed class EfFormsRepository : IFormsRepository
 
         var form = new FormAggregate
         {
-            Name = "Expense approval",
-            Description = "Demo form showing builder, publishing, sequential approvals, and historical rendering.",
-            Key = "expense-approval",
+            Name = "Untitled form",
+            Description = "",
+            Key = "untitled-form",
             OwnerUserId = DemoCurrentUserContext.DefaultUserId,
             DraftDefinition = DemoFormFactory.CreateDefaultDefinition(),
             Publication = new FormPublication
             {
-                Slug = "expense-approval",
+                Slug = "untitled-form",
                 AccessMode = FormAccessMode.Public,
                 Domain = "demo.local",
                 EditMode = SubmissionEditMode.ImmutableRevisions
@@ -402,6 +404,30 @@ internal sealed class EfFormsRepository : IFormsRepository
             END;
 
             IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Forms', N'ArchivedUtc') IS NULL
+            BEGIN
+                ALTER TABLE [Forms]
+                ADD [ArchivedUtc] DATETIMEOFFSET NULL;
+            END;
+
+            IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
+               AND COL_LENGTH(N'Forms', N'ArchivedByUserId') IS NULL
+            BEGIN
+                ALTER TABLE [Forms]
+                ADD [ArchivedByUserId] UNIQUEIDENTIFIER NULL;
+            END;
+
+            IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
+               AND NOT EXISTS (
+                    SELECT 1
+                    FROM sys.indexes
+                    WHERE name = N'IX_Forms_ArchivedUtc'
+                      AND object_id = OBJECT_ID(N'Forms', N'U'))
+            BEGIN
+                CREATE INDEX [IX_Forms_ArchivedUtc] ON [Forms] ([ArchivedUtc]);
+            END;
+
+            IF OBJECT_ID(N'Forms', N'U') IS NOT NULL
                AND COL_LENGTH(N'Forms', N'PublicationEditMode') IS NULL
             BEGIN
                 ALTER TABLE [Forms]
@@ -602,15 +628,9 @@ internal sealed class EfFormsRepository : IFormsRepository
             cancellationToken);
     }
 
-    public async Task<IReadOnlyList<FormAggregate>> GetFormsAsync(CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<FormAggregate>> GetFormsAsync(CancellationToken cancellationToken = default, bool includeArchived = false)
     {
-        var entities = await db.Forms
-            .Include(f => f.Versions)
-            .Include(f => f.Permissions)
-            .Include(f => f.Notifications)
-            .Include(f => f.Webhooks)
-            .AsSplitQuery()
-            .AsNoTracking()
+        var entities = await CreateFormQuery(includeArchived)
             .ToListAsync(cancellationToken);
 
         var results = new List<FormAggregate>(entities.Count);
@@ -622,28 +642,16 @@ internal sealed class EfFormsRepository : IFormsRepository
         return results;
     }
 
-    public async Task<FormAggregate?> GetFormAsync(Guid formId, CancellationToken cancellationToken = default)
+    public async Task<FormAggregate?> GetFormAsync(Guid formId, CancellationToken cancellationToken = default, bool includeArchived = false)
     {
-        var entity = await db.Forms
-            .Include(f => f.Versions)
-            .Include(f => f.Permissions)
-            .Include(f => f.Notifications)
-            .Include(f => f.Webhooks)
-            .AsSplitQuery()
-            .AsNoTracking()
+        var entity = await CreateFormQuery(includeArchived)
             .FirstOrDefaultAsync(f => f.Id == formId, cancellationToken);
         return entity is null ? null : ToAggregate(entity);
     }
 
-    public async Task<FormAggregate?> GetFormBySlugAsync(string slug, CancellationToken cancellationToken = default)
+    public async Task<FormAggregate?> GetFormBySlugAsync(string slug, CancellationToken cancellationToken = default, bool includeArchived = false)
     {
-        var entity = await db.Forms
-            .Include(f => f.Versions)
-            .Include(f => f.Permissions)
-            .Include(f => f.Notifications)
-            .Include(f => f.Webhooks)
-            .AsSplitQuery()
-            .AsNoTracking()
+        var entity = await CreateFormQuery(includeArchived)
             .FirstOrDefaultAsync(f => f.PublicationSlug == slug, cancellationToken);
         return entity is null ? null : ToAggregate(entity);
     }
@@ -651,194 +659,290 @@ internal sealed class EfFormsRepository : IFormsRepository
     public async Task SaveFormAsync(FormAggregate form, CancellationToken cancellationToken = default)
     {
         var strategy = db.Database.CreateExecutionStrategy();
-        await strategy.ExecuteAsync(async () =>
+
+        for (var attempt = 1; attempt <= 2; attempt++)
         {
-            db.ChangeTracker.Clear();
-            await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-
-            var existing = await db.Forms
-                .Include(f => f.Versions)
-                .Include(f => f.Permissions)
-                .Include(f => f.Notifications)
-                .Include(f => f.Webhooks)
-                .FirstOrDefaultAsync(f => f.Id == form.Id, cancellationToken);
-
-            if (existing is null)
-            {
-                existing = new FormEntity { Id = form.Id };
-                db.Forms.Add(existing);
-            }
-
-            existing.Key = form.Key;
-            existing.Name = form.Name;
-            existing.Description = form.Description;
-            existing.OwnerUserId = form.OwnerUserId;
-            existing.UpdatedUtc = form.UpdatedUtc;
-            existing.DraftDefinitionJson = serializer.Serialize(form.DraftDefinition);
-            existing.PublicationSlug = form.Publication.Slug;
-            existing.PublicationDomain = form.Publication.Domain;
-            existing.PublicationAccessMode = (int)form.Publication.AccessMode;
-            existing.PublicationSendSubmissionCopyToSubmitter = form.Publication.SendSubmissionCopyToSubmitter;
-            existing.PublicationEditMode = (int)form.Publication.EditMode;
-            existing.PublicationOpenUtc = form.Publication.OpenUtc;
-            existing.PublicationCloseUtc = form.Publication.CloseUtc;
-            existing.PublicationNotYetOpenMessage = form.Publication.NotYetOpenMessage;
-            existing.PublicationClosedMessage = form.Publication.ClosedMessage;
-            existing.PublicationMaxSubmissions = form.Publication.MaxSubmissions;
-            existing.PublicationCapReachedMessage = form.Publication.CapReachedMessage;
-            existing.PublicationConfirmationMessage = form.Publication.ConfirmationMessage;
-            existing.PublicationConfirmationRedirectUrl = form.Publication.ConfirmationRedirectUrl;
-            existing.PublicationAccessPasswordHash = form.Publication.AccessPasswordHash;
-            existing.PublicationRequireCaptcha = form.Publication.RequireCaptcha;
-            existing.PublicationAutoSaveIntervalSeconds = form.Publication.AutoSaveIntervalSeconds;
-
-            // Form versions are immutable snapshots; append new ones only.
-            var existingVersionIds = existing.Versions.Select(v => v.Id).ToHashSet();
-            foreach (var v in form.Versions)
-            {
-                if (existingVersionIds.Contains(v.Id))
-                {
-                    continue;
-                }
-
-                db.FormVersions.Add(new FormVersionEntity
-                {
-                    Id = v.Id,
-                    FormId = existing.Id,
-                    VersionNumber = v.VersionNumber,
-                    CreatedUtc = v.CreatedUtc,
-                    DefinitionJson = v.DefinitionJson
-                });
-            }
-
-            var desiredPermissionsByUserId = form.Permissions
-                .Where(p => p.UserId != Guid.Empty)
-                .GroupBy(p => p.UserId)
-                .ToDictionary(g => g.Key, g => g.First());
-
-            foreach (var existingPermission in existing.Permissions.ToList())
-            {
-                if (!desiredPermissionsByUserId.ContainsKey(existingPermission.UserId))
-                {
-                    db.FormPermissions.Remove(existingPermission);
-                }
-            }
-
-            foreach (var desired in desiredPermissionsByUserId.Values)
-            {
-                var match = existing.Permissions.FirstOrDefault(p => p.UserId == desired.UserId);
-                if (match is null)
-                {
-                    existing.Permissions.Add(new FormPermissionEntity
-                    {
-                        Id = Guid.NewGuid(),
-                        UserId = desired.UserId,
-                        DisplayName = desired.DisplayName,
-                        Role = (int)desired.Role,
-                        ScopeType = string.IsNullOrWhiteSpace(desired.ScopeType) ? "Form" : desired.ScopeType,
-                        ScopeValue = desired.ScopeValue,
-                        UpdatedByUserId = form.OwnerUserId,
-                        UpdatedUtc = DateTimeOffset.UtcNow
-                    });
-                    continue;
-                }
-
-                match.DisplayName = desired.DisplayName;
-                match.Role = (int)desired.Role;
-                match.ScopeType = string.IsNullOrWhiteSpace(desired.ScopeType) ? "Form" : desired.ScopeType;
-                match.ScopeValue = desired.ScopeValue;
-                match.UpdatedByUserId = form.OwnerUserId;
-                match.UpdatedUtc = DateTimeOffset.UtcNow;
-            }
-
-            var desiredNotificationsByEmail = form.Notifications
-                .Where(n => !string.IsNullOrWhiteSpace(n.Email))
-                .GroupBy(n => n.Email.Trim(), StringComparer.OrdinalIgnoreCase)
-                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
-
-            foreach (var existingNotification in existing.Notifications.ToList())
-            {
-                if (!desiredNotificationsByEmail.ContainsKey(existingNotification.Email))
-                {
-                    db.FormNotifications.Remove(existingNotification);
-                }
-            }
-
-            foreach (var desired in desiredNotificationsByEmail.Values)
-            {
-                var match = existing.Notifications.FirstOrDefault(n =>
-                    string.Equals(n.Email, desired.Email, StringComparison.OrdinalIgnoreCase));
-
-                if (match is null)
-                {
-                    existing.Notifications.Add(new FormNotificationEntity
-                    {
-                        Id = Guid.NewGuid(),
-                        Email = desired.Email.Trim(),
-                        OnSubmission = desired.OnSubmission,
-                        OnApproval = desired.OnApproval
-                    });
-                    continue;
-                }
-
-                match.OnSubmission = desired.OnSubmission;
-                match.OnApproval = desired.OnApproval;
-            }
-
-            var desiredWebhooksById = form.Webhooks.Where(w => !string.IsNullOrWhiteSpace(w.Url)).ToDictionary(w => w.Id);
-            foreach (var existingWebhook in existing.Webhooks.ToList())
-            {
-                if (!desiredWebhooksById.ContainsKey(existingWebhook.Id))
-                {
-                    db.FormWebhooks.Remove(existingWebhook);
-                }
-            }
-
-            foreach (var desired in desiredWebhooksById.Values)
-            {
-                var match = existing.Webhooks.FirstOrDefault(w => w.Id == desired.Id);
-                var triggerEventsJson = JsonSerializer.Serialize(desired.TriggerEvents);
-                var headersJson = JsonSerializer.Serialize(desired.Headers);
-
-                if (match is null)
-                {
-                    existing.Webhooks.Add(new FormWebhookEntity
-                    {
-                        Id = desired.Id,
-                        FormId = existing.Id,
-                        Url = desired.Url,
-                        Secret = desired.Secret,
-                        TriggerEventsJson = triggerEventsJson,
-                        HeadersJson = headersJson,
-                        IsEnabled = desired.IsEnabled
-                    });
-                    continue;
-                }
-
-                match.Url = desired.Url;
-                match.Secret = desired.Secret;
-                match.TriggerEventsJson = triggerEventsJson;
-                match.HeadersJson = headersJson;
-                match.IsEnabled = desired.IsEnabled;
-            }
-
             try
             {
-                await db.SaveChangesAsync(cancellationToken);
+                await strategy.ExecuteAsync(async () =>
+                {
+                    db.ChangeTracker.Clear();
+                    await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
+                    var fetchStart = DateTimeOffset.UtcNow;
+                    var existing = await db.Forms
+                        .Include(f => f.Versions)
+                        .Include(f => f.Permissions)
+                        .Include(f => f.Notifications)
+                        .Include(f => f.Webhooks)
+                        .FirstOrDefaultAsync(f => f.Id == form.Id, cancellationToken);
+                    logger.LogInformation("Fetched existing form {FormId} RowVersion={RowVersion} in {Elapsed}ms",
+                        form.Id, existing is null ? "null" : Convert.ToBase64String(existing.RowVersion), (DateTimeOffset.UtcNow - fetchStart).TotalMilliseconds);
+
+                    if (existing is null)
+                    {
+                        existing = new FormEntity { Id = form.Id };
+                        db.Forms.Add(existing);
+                    }
+
+                    existing.Key = form.Key;
+                    existing.Name = form.Name;
+                    existing.Description = form.Description;
+                    existing.OwnerUserId = form.OwnerUserId;
+                    existing.UpdatedUtc = form.UpdatedUtc;
+                    existing.ArchivedUtc = form.ArchivedUtc;
+                    existing.ArchivedByUserId = form.ArchivedByUserId;
+                    existing.DraftDefinitionJson = serializer.Serialize(form.DraftDefinition);
+                    existing.PublicationSlug = form.Publication.Slug;
+                    existing.PublicationDomain = form.Publication.Domain;
+                    existing.PublicationAccessMode = (int)form.Publication.AccessMode;
+                    existing.PublicationSendSubmissionCopyToSubmitter = form.Publication.SendSubmissionCopyToSubmitter;
+                    existing.PublicationEditMode = (int)form.Publication.EditMode;
+                    existing.PublicationOpenUtc = form.Publication.OpenUtc;
+                    existing.PublicationCloseUtc = form.Publication.CloseUtc;
+                    existing.PublicationNotYetOpenMessage = form.Publication.NotYetOpenMessage;
+                    existing.PublicationClosedMessage = form.Publication.ClosedMessage;
+                    existing.PublicationMaxSubmissions = form.Publication.MaxSubmissions;
+                    existing.PublicationCapReachedMessage = form.Publication.CapReachedMessage;
+                    existing.PublicationConfirmationMessage = form.Publication.ConfirmationMessage;
+                    existing.PublicationConfirmationRedirectUrl = form.Publication.ConfirmationRedirectUrl;
+                    existing.PublicationAccessPasswordHash = form.Publication.AccessPasswordHash;
+                    existing.PublicationRequireCaptcha = form.Publication.RequireCaptcha;
+                    existing.PublicationAutoSaveIntervalSeconds = form.Publication.AutoSaveIntervalSeconds;
+
+                    // Form versions are immutable snapshots; append new ones only.
+                    var existingVersionIds = existing.Versions.Select(v => v.Id).ToHashSet();
+                    foreach (var v in form.Versions)
+                    {
+                        if (existingVersionIds.Contains(v.Id))
+                        {
+                            continue;
+                        }
+
+                        db.FormVersions.Add(new FormVersionEntity
+                        {
+                            Id = v.Id,
+                            FormId = existing.Id,
+                            VersionNumber = v.VersionNumber,
+                            CreatedUtc = v.CreatedUtc,
+                            DefinitionJson = v.DefinitionJson
+                        });
+                    }
+
+                    var desiredPermissionsByUserId = form.Permissions
+                        .Select(NormalizePermissionGrantForPersistence)
+                        .GroupBy(p => p.UserId)
+                        .ToDictionary(g => g.Key, g => g.First());
+
+                    // Persist permissions with explicit DbSet delete/insert operations (same style as webhooks)
+                    // to avoid relationship fixup turning removed rows into Modified updates.
+                    foreach (var existingPermission in existing.Permissions.ToList())
+                    {
+                        db.FormPermissions.Remove(existingPermission);
+                    }
+
+                    foreach (var desired in desiredPermissionsByUserId.Values)
+                    {
+                        var normalizedScopeType = string.IsNullOrWhiteSpace(desired.ScopeType) ? "Form" : desired.ScopeType;
+                        db.FormPermissions.Add(new FormPermissionEntity
+                        {
+                            FormId = existing.Id,
+                            UserId = desired.UserId,
+                            DisplayName = desired.DisplayName,
+                            Role = (int)desired.Role,
+                            ScopeType = normalizedScopeType,
+                            ScopeValue = desired.ScopeValue,
+                            UpdatedByUserId = form.OwnerUserId,
+                            UpdatedUtc = DateTimeOffset.UtcNow
+                        });
+                    }
+
+                    var desiredNotificationsByEmail = form.Notifications
+                        .Where(n => !string.IsNullOrWhiteSpace(n.Email))
+                        .GroupBy(n => n.Email.Trim(), StringComparer.OrdinalIgnoreCase)
+                        .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+
+                    foreach (var existingNotification in existing.Notifications.ToList())
+                    {
+                        if (!desiredNotificationsByEmail.ContainsKey(existingNotification.Email))
+                        {
+                            db.FormNotifications.Remove(existingNotification);
+                        }
+                    }
+
+                    foreach (var desired in desiredNotificationsByEmail.Values)
+                    {
+                        var match = existing.Notifications.FirstOrDefault(n =>
+                            string.Equals(n.Email, desired.Email, StringComparison.OrdinalIgnoreCase));
+
+                        if (match is null)
+                        {
+                            existing.Notifications.Add(new FormNotificationEntity
+                            {
+                                Id = Guid.NewGuid(),
+                                Email = desired.Email.Trim(),
+                                OnSubmission = desired.OnSubmission,
+                                OnApproval = desired.OnApproval
+                            });
+                            continue;
+                        }
+
+                        match.OnSubmission = desired.OnSubmission;
+                        match.OnApproval = desired.OnApproval;
+                    }
+
+                    var desiredWebhooksById = form.Webhooks.Where(w => !string.IsNullOrWhiteSpace(w.Url)).ToDictionary(w => w.Id);
+                    foreach (var existingWebhook in existing.Webhooks.ToList())
+                    {
+                        if (!desiredWebhooksById.ContainsKey(existingWebhook.Id))
+                        {
+                            db.FormWebhooks.Remove(existingWebhook);
+                        }
+                    }
+
+                    foreach (var desired in desiredWebhooksById.Values)
+                    {
+                        var match = existing.Webhooks.FirstOrDefault(w => w.Id == desired.Id);
+                        var triggerEventsJson = JsonSerializer.Serialize(desired.TriggerEvents);
+                        var headersJson = JsonSerializer.Serialize(desired.Headers);
+
+                        if (match is null)
+                        {
+                            db.FormWebhooks.Add(new FormWebhookEntity
+                            {
+                                Id = desired.Id,
+                                FormId = existing.Id,
+                                Url = desired.Url,
+                                Secret = desired.Secret,
+                                TriggerEventsJson = triggerEventsJson,
+                                HeadersJson = headersJson,
+                                IsEnabled = desired.IsEnabled
+                            });
+                            continue;
+                        }
+
+                        match.Url = desired.Url;
+                        match.Secret = desired.Secret;
+                        match.TriggerEventsJson = triggerEventsJson;
+                        match.HeadersJson = headersJson;
+                        match.IsEnabled = desired.IsEnabled;
+                    }
+
+                    try
+                    {
+                        logger.LogInformation("Calling SaveChangesAsync for {FormId}", form.Id);
+                        await db.SaveChangesAsync(cancellationToken);
+                    }
+                    catch (DbUpdateConcurrencyException)
+                    {
+                        // Preserve concurrency exceptions so the outer retry/translation logic can handle them.
+                        throw;
+                    }
+                    catch (DbUpdateException ex)
+                    {
+                        logger.LogError(ex, "Database update failed while saving form {FormId}.", form.Id);
+                        throw new InvalidOperationException("The form could not be saved due to a database update failure.", ex);
+                    }
+
+                    await transaction.CommitAsync(cancellationToken);
+                });
+
+                return;
+            }
+            catch (DbUpdateConcurrencyException ex) when (attempt < 2)
+            {
+                logger.LogWarning(ex, "Concurrency conflict while saving form {FormId}; retrying once.", form.Id);
             }
             catch (DbUpdateConcurrencyException ex)
             {
                 logger.LogWarning(ex, "Concurrency conflict while saving form {FormId}.", form.Id);
                 throw new InvalidOperationException("The form was updated by another user. Reload and retry.", ex);
             }
-            catch (DbUpdateException ex)
-            {
-                logger.LogError(ex, "Database update failed while saving form {FormId}.", form.Id);
-                throw new InvalidOperationException("The form could not be saved due to a database update failure.", ex);
-            }
+        }
+    }
 
-            await transaction.CommitAsync(cancellationToken);
-        });
+    public async Task ArchiveFormAsync(Guid formId, Guid archivedByUserId, DateTimeOffset archivedUtc, CancellationToken cancellationToken = default)
+    {
+        var updated = await db.Forms
+            .Where(form => form.Id == formId && form.ArchivedUtc == null)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(form => form.ArchivedUtc, archivedUtc)
+                .SetProperty(form => form.ArchivedByUserId, archivedByUserId)
+                .SetProperty(form => form.UpdatedUtc, archivedUtc), cancellationToken);
+
+        if (updated == 0)
+        {
+            throw new InvalidOperationException("Form not found or already archived.");
+        }
+    }
+
+    public async Task RestoreFormAsync(Guid formId, CancellationToken cancellationToken = default)
+    {
+        var restoredUtc = DateTimeOffset.UtcNow;
+        var updated = await db.Forms
+            .Where(form => form.Id == formId && form.ArchivedUtc != null)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(form => form.ArchivedUtc, (DateTimeOffset?)null)
+                .SetProperty(form => form.ArchivedByUserId, (Guid?)null)
+                .SetProperty(form => form.UpdatedUtc, restoredUtc), cancellationToken);
+
+        if (updated == 0)
+        {
+            throw new InvalidOperationException("Archived form not found.");
+        }
+    }
+
+    public async Task DeleteFormAsync(Guid formId, CancellationToken cancellationToken = default)
+    {
+        var entryIds = await db.Entries
+            .Where(entry => entry.FormId == formId)
+            .Select(entry => entry.Id)
+            .ToListAsync(cancellationToken);
+
+        await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
+
+        if (entryIds.Count > 0)
+        {
+            await db.ApprovalAuditEvents.Where(item => entryIds.Contains(item.EntryId)).ExecuteDeleteAsync(cancellationToken);
+            await db.ApprovalSteps.Where(item => entryIds.Contains(item.EntryId)).ExecuteDeleteAsync(cancellationToken);
+            await db.EntryRevisions.Where(item => entryIds.Contains(item.EntryId)).ExecuteDeleteAsync(cancellationToken);
+            await db.EntrySearchIndex.Where(item => entryIds.Contains(item.EntryId)).ExecuteDeleteAsync(cancellationToken);
+            await db.EntryFiles.Where(item => entryIds.Contains(item.EntryId)).ExecuteDeleteAsync(cancellationToken);
+            await db.Entries.Where(entry => entry.FormId == formId).ExecuteDeleteAsync(cancellationToken);
+        }
+
+        await db.FormInvitations.Where(item => item.FormId == formId).ExecuteDeleteAsync(cancellationToken);
+        await db.FormAnalytics.Where(item => item.FormId == formId).ExecuteDeleteAsync(cancellationToken);
+        await db.FormWebhooks.Where(item => item.FormId == formId).ExecuteDeleteAsync(cancellationToken);
+        await db.FormNotifications.Where(item => item.FormId == formId).ExecuteDeleteAsync(cancellationToken);
+        await db.FormPermissions.Where(item => item.FormId == formId).ExecuteDeleteAsync(cancellationToken);
+        await db.FormVersions.Where(item => item.FormId == formId).ExecuteDeleteAsync(cancellationToken);
+
+        var deleted = await db.Forms.Where(form => form.Id == formId).ExecuteDeleteAsync(cancellationToken);
+        if (deleted == 0)
+        {
+            throw new InvalidOperationException("Form not found.");
+        }
+
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<StoredFile>> GetStoredFilesAsync(Guid formId, CancellationToken cancellationToken = default)
+    {
+        return await db.EntryFiles
+            .AsNoTracking()
+            .Where(file => file.Entry != null && file.Entry.FormId == formId)
+            .OrderBy(file => file.UploadedUtc)
+            .Select(file => new StoredFile
+            {
+                Id = file.Id,
+                FileName = file.FileName,
+                ContentType = file.ContentType,
+                Length = file.Length,
+                RelativePath = file.RelativePath,
+                Sha256 = file.Sha256
+            })
+            .ToListAsync(cancellationToken);
     }
 
     public async Task<IReadOnlyList<EntryRecord>> GetEntriesAsync(Guid? formId, string? search, CancellationToken cancellationToken = default)
@@ -853,6 +957,7 @@ internal sealed class EfFormsRepository : IFormsRepository
     public async Task<IReadOnlyList<EntryRecord>> QueryEntriesAsync(EntryQueryOptions options, CancellationToken cancellationToken = default)
     {
         var q = db.Entries
+            .Where(e => e.Form != null && e.Form.ArchivedUtc == null)
             .Include(e => e.Revisions)
             .Include(e => e.ApprovalSteps)
             .Include(e => e.Files)
@@ -1255,6 +1360,24 @@ internal sealed class EfFormsRepository : IFormsRepository
         await db.SaveChangesAsync(cancellationToken);
     }
 
+    private IQueryable<FormEntity> CreateFormQuery(bool includeArchived)
+    {
+        var query = db.Forms
+            .Include(f => f.Versions)
+            .Include(f => f.Permissions)
+            .Include(f => f.Notifications)
+            .Include(f => f.Webhooks)
+            .AsSplitQuery()
+            .AsNoTracking();
+
+        if (!includeArchived)
+        {
+            query = query.Where(f => f.ArchivedUtc == null);
+        }
+
+        return query;
+    }
+
     private FormAggregate ToAggregate(FormEntity entity)
     {
         return new FormAggregate
@@ -1266,6 +1389,8 @@ internal sealed class EfFormsRepository : IFormsRepository
             OwnerUserId = entity.OwnerUserId,
             CreatedUtc = entity.CreatedUtc,
             UpdatedUtc = entity.UpdatedUtc,
+            ArchivedUtc = entity.ArchivedUtc,
+            ArchivedByUserId = entity.ArchivedByUserId,
             DraftDefinition = string.IsNullOrWhiteSpace(entity.DraftDefinitionJson) ? new FormDefinition() : serializer.Deserialize(entity.DraftDefinitionJson!),
             Publication = new FormPublication
             {
@@ -1397,6 +1522,27 @@ internal sealed class EfFormsRepository : IFormsRepository
                 CorrelationId = a.CorrelationId,
                 OccurredUtc = a.OccurredUtc
             }).ToList()
+        };
+    }
+
+    private static FormPermissionGrant NormalizePermissionGrantForPersistence(FormPermissionGrant grant)
+    {
+        if (grant.UserId != Guid.Empty)
+        {
+            return grant;
+        }
+
+        var scopeType = string.IsNullOrWhiteSpace(grant.ScopeType) ? "Form" : grant.ScopeType.Trim();
+        var scopeValue = (grant.ScopeValue ?? string.Empty).Trim();
+        var syntheticUserId = new Guid(MD5.HashData(Encoding.UTF8.GetBytes($"scope:{scopeType}:{scopeValue.ToLowerInvariant()}")));
+
+        return new FormPermissionGrant
+        {
+            UserId = syntheticUserId,
+            DisplayName = grant.DisplayName,
+            Role = grant.Role,
+            ScopeType = scopeType,
+            ScopeValue = scopeValue
         };
     }
 

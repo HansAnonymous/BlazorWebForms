@@ -270,6 +270,12 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<DateTimeOffset?>("ArchivedUtc")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid?>("ArchivedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTimeOffset>("CreatedUtc")
                         .HasColumnType("datetimeoffset");
 
@@ -359,6 +365,8 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                         .HasColumnType("datetimeoffset");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ArchivedUtc");
 
                     b.HasIndex("Key")
                         .IsUnique();

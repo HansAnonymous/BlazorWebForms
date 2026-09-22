@@ -2,27 +2,30 @@ namespace BlazorWebForms.Core.Models;
 
 public sealed class FormAggregate
 {
-    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid Id { get; init; } = Guid.NewGuid();
     public string Key { get; set; } = $"form-{Guid.NewGuid():N}";
     public string Name { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
-    public Guid OwnerUserId { get; set; }
-    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public Guid OwnerUserId { get; init; }
+    public DateTimeOffset CreatedUtc { get; init; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? ArchivedUtc { get; set; }
+    public Guid? ArchivedByUserId { get; set; }
+    public bool IsArchived => ArchivedUtc.HasValue;
     public FormDefinition DraftDefinition { get; set; } = new();
-    public List<FormVersionRecord> Versions { get; set; } = [];
-    public FormPublication Publication { get; set; } = new();
-    public List<FormPermissionGrant> Permissions { get; set; } = [];
-    public List<FormNotificationRule> Notifications { get; set; } = [];
-    public List<FormWebhookDefinition> Webhooks { get; set; } = [];
+    public List<FormVersionRecord> Versions { get; init; } = [];
+    public FormPublication Publication { get; init; } = new();
+    public List<FormPermissionGrant> Permissions { get; init; } = [];
+    public List<FormNotificationRule> Notifications { get; init; } = [];
+    public List<FormWebhookDefinition> Webhooks { get; init; } = [];
 }
 
 public sealed class FormVersionRecord
 {
-    public Guid Id { get; set; } = Guid.NewGuid();
-    public int VersionNumber { get; set; }
-    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
-    public string DefinitionJson { get; set; } = string.Empty;
+    public Guid Id { get; init; } = Guid.NewGuid();
+    public int VersionNumber { get; init; }
+    public DateTimeOffset CreatedUtc { get; init; } = DateTimeOffset.UtcNow;
+    public string DefinitionJson { get; init; } = string.Empty;
 }
 
 public sealed class FormPublication
@@ -34,7 +37,10 @@ public sealed class FormPublication
     public SubmissionEditMode EditMode { get; set; } = SubmissionEditMode.ImmutableRevisions;
 
     // ── Scheduling ───────────────────────────────────────────────────────────
-    /// <summary>UTC timestamp before which the form is not yet accepting submissions. Null means open immediately after publishing.</summary>
+    /// <summary>
+    /// UTC timestamp before which the form is not yet accepting submissions. Null means open immediately after
+    /// publishing.
+    /// </summary>
     public DateTimeOffset? OpenUtc { get; set; }
     /// <summary>UTC timestamp after which the form stops accepting submissions. Null means never closes.</summary>
     public DateTimeOffset? CloseUtc { get; set; }
@@ -44,7 +50,10 @@ public sealed class FormPublication
     public string ClosedMessage { get; set; } = string.Empty;
 
     // ── Submission caps ───────────────────────────────────────────────────────
-    /// <summary>Maximum number of non-draft submissions accepted. Once reached, the form stops accepting new submissions. Null means unlimited.</summary>
+    /// <summary>
+    /// Maximum number of non-draft submissions accepted. Once reached, the form stops accepting new
+    /// submissions. Null means unlimited.
+    /// </summary>
     public int? MaxSubmissions { get; set; }
     /// <summary>Message shown when the submission cap is reached.</summary>
     public string CapReachedMessage { get; set; } = string.Empty;
@@ -52,26 +61,32 @@ public sealed class FormPublication
     // ── Confirmation page ─────────────────────────────────────────────────────
     /// <summary>Markdown or plain text shown to the submitter after a successful submission.</summary>
     public string ConfirmationMessage { get; set; } = string.Empty;
-    /// <summary>When set, the host UI redirects the submitter to this URL after submission instead of showing the confirmation message.</summary>
+    /// <summary>
+    /// When set, the host UI redirects the submitter to this URL after submission instead of showing the confirmation
+    /// message.
+    /// </summary>
     public string ConfirmationRedirectUrl { get; set; } = string.Empty;
 
     // ── Access control ────────────────────────────────────────────────────────
     /// <summary>
     /// HMAC-SHA256 hash of the access password (hex string). When non-empty, submitters must
-    /// supply the matching password via <see cref="ViewModels.SubmitEntryRequest.AccessPassword"/> before submitting.
+    /// supply the matching password via <see cref="BlazorWebForms.Core.Models.SubmitEntryRequest.AccessPassword"/>
+    /// before submitting.
     /// </summary>
     public string AccessPasswordHash { get; set; } = string.Empty;
     /// <summary>Whether a CAPTCHA token must be validated on submission.</summary>
     public bool RequireCaptcha { get; set; }
 
     // ── Draft auto-save ────────────────────────────────────────────────────────
-    /// <summary>When > 0, the host UI automatically saves a draft at this interval (in seconds). 0 or null disables auto-save.</summary>
+    /// <summary>
+    /// When > 0, the host UI automatically saves a draft at this interval (in seconds). 0 or null disables auto-save.
+    /// </summary>
     public int? AutoSaveIntervalSeconds { get; set; }
 }
 
 public sealed class FormPermissionGrant
 {
-    public Guid UserId { get; set; }
+    public Guid UserId { get; init; }
     public string DisplayName { get; set; } = string.Empty;
     public FormPermissionRole Role { get; set; }
     public string ScopeType { get; set; } = "Form";
@@ -116,9 +131,15 @@ public sealed class EntryRecord
     public List<EntryRevisionRecord> Revisions { get; set; } = [];
     public List<ApprovalStepRecord> ApprovalSteps { get; set; } = [];
     public List<ApprovalAuditEvent> ApprovalAuditTrail { get; set; } = [];
-    /// <summary>Computed quiz/scoring total. Populated at submission time when the form definition has <c>IsQuizMode = true</c>.</summary>
+    /// <summary>
+    /// Computed quiz/scoring total. Populated at submission time when the form definition has
+    /// <c>IsQuizMode = true</c>.
+    /// </summary>
     public decimal? Score { get; set; }
-    /// <summary>Whether the submitter passed the quiz (based on <c>FormDefinition.PassScore</c>). Null when quiz mode is off or no pass score is configured.</summary>
+    /// <summary>
+    /// Whether the submitter passed the quiz (based on <c>FormDefinition.PassScore</c>).
+    /// Null when quiz mode is off or no pass score is configured.
+    /// </summary>
     public bool? QuizPassed { get; set; }
 }
 
@@ -139,14 +160,14 @@ public sealed class EntryFileRecord
 
 public sealed class EntryQueryOptions
 {
-    public Guid? FormId { get; set; }
-    public EntryStatus? Status { get; set; }
-    public IReadOnlyList<EntryStatus>? Statuses { get; set; }
+    public Guid? FormId { get; init; }
+    public EntryStatus? Status { get; init; }
+    public IReadOnlyList<EntryStatus>? Statuses { get; init; }
     public DateTimeOffset? SubmittedFromUtc { get; set; }
     public DateTimeOffset? SubmittedToUtc { get; set; }
-    public string? Search { get; set; }
-    public string? IndexedFieldId { get; set; }
-    public string? IndexedFieldValue { get; set; }
+    public string? Search { get; init; }
+    public string? IndexedFieldId { get; init; }
+    public string? IndexedFieldValue { get; init; }
     public int Offset { get; set; }
     public int Limit { get; set; }
 }
@@ -207,45 +228,45 @@ public sealed class ApprovalAuditEvent
 public sealed class StoredFile
 {
     public Guid Id { get; set; } = Guid.NewGuid();
-    public string FileName { get; set; } = string.Empty;
-    public string ContentType { get; set; } = "application/octet-stream";
-    public long Length { get; set; }
-    public string RelativePath { get; set; } = string.Empty;
-    public string Sha256 { get; set; } = string.Empty;
+    public string FileName { get; init; } = string.Empty;
+    public string ContentType { get; init; } = "application/octet-stream";
+    public long Length { get; init; }
+    public string RelativePath { get; init; } = string.Empty;
+    public string Sha256 { get; init; } = string.Empty;
 }
 
 public sealed class FileUploadRequest
 {
-    public string FileName { get; set; } = string.Empty;
-    public string ContentType { get; set; } = "application/octet-stream";
-    public byte[] Content { get; set; } = [];
-    public long? MaxAllowedBytes { get; set; }
-    public List<string> AllowedMimeTypes { get; set; } = [];
-    public List<string> AllowedExtensions { get; set; } = [];
+    public string FileName { get; init; } = string.Empty;
+    public string ContentType { get; init; } = "application/octet-stream";
+    public byte[] Content { get; init; } = [];
+    public long? MaxAllowedBytes { get; init; }
+    public List<string> AllowedMimeTypes { get; init; } = [];
+    public List<string> AllowedExtensions { get; init; } = [];
 }
 
 public sealed class UserProfile
 {
-    public Guid UserId { get; set; }
-    public bool IsAuthenticated { get; set; }
-    public string DisplayName { get; set; } = string.Empty;
+    public Guid UserId { get; init; }
+    public bool IsAuthenticated { get; init; }
+    public string DisplayName { get; init; } = string.Empty;
     public string Email { get; set; } = string.Empty;
-    public List<FormPermissionRole> Roles { get; set; } = [];
+    public List<FormPermissionRole> Roles { get; init; } = [];
 }
 
 public sealed class FormInvitation
 {
-    public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid FormId { get; set; }
+    public Guid Id { get; init; } = Guid.NewGuid();
+    public Guid FormId { get; init; }
     public string Email { get; set; } = string.Empty;
     public FormPermissionRole Role { get; set; }
     public string ScopeType { get; set; } = "Form";
     public string? ScopeValue { get; set; }
     public string Token { get; set; } = string.Empty;
-    public DateTimeOffset ExpiresUtc { get; set; }
+    public DateTimeOffset ExpiresUtc { get; init; }
     public InvitationStatus Status { get; set; } = InvitationStatus.Pending;
-    public Guid CreatedByUserId { get; set; }
-    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public Guid CreatedByUserId { get; init; }
+    public DateTimeOffset CreatedUtc { get; init; } = DateTimeOffset.UtcNow;
     public Guid? UpdatedByUserId { get; set; }
     public DateTimeOffset? UpdatedUtc { get; set; }
 }

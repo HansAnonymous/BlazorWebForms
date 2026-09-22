@@ -44,6 +44,7 @@ public sealed class SaveDraftRequest
     public SubmissionEditMode EditMode { get; set; } = SubmissionEditMode.ImmutableRevisions;
     public FormDefinition Definition { get; set; } = new();
     public List<string> NotificationEmails { get; set; } = [];
+    public List<FormPermissionGrant> Permissions { get; set; } = [];
     public List<FormWebhookDefinition> Webhooks { get; set; } = [];
     // Publication settings forwarded from the builder
     public DateTimeOffset? OpenUtc { get; set; }

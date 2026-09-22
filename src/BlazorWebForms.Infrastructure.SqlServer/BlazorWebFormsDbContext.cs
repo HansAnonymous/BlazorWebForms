@@ -43,6 +43,7 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.Property(x => x.Key).IsRequired();
             b.Property(x => x.Name).IsRequired();
             b.Property(x => x.Description).HasMaxLength(2000);
+            b.Property(x => x.ArchivedUtc).HasColumnType("datetimeoffset");
             b.Property(x => x.DraftDefinitionJson).HasColumnType("nvarchar(max)");
             b.Property(x => x.PublicationNotYetOpenMessage).HasMaxLength(2000);
             b.Property(x => x.PublicationClosedMessage).HasMaxLength(2000);
@@ -54,6 +55,7 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.HasIndex(x => x.Key).IsUnique();
             b.HasIndex(x => x.PublicationSlug).IsUnique();
             b.HasIndex(x => x.UpdatedUtc);
+            b.HasIndex(x => x.ArchivedUtc);
             b.HasMany(x => x.Versions).WithOne(v => v.Form).HasForeignKey(v => v.FormId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Permissions).WithOne(p => p.Form).HasForeignKey(p => p.FormId).OnDelete(DeleteBehavior.Cascade);
             b.HasMany(x => x.Notifications).WithOne(n => n.Form).HasForeignKey(n => n.FormId).OnDelete(DeleteBehavior.Cascade);
@@ -157,6 +159,7 @@ public sealed class BlazorWebFormsDbContext : DbContext
         {
             b.ToTable("FormWebhooks");
             b.HasKey(x => x.Id);
+            b.Property(x => x.Id).ValueGeneratedNever();
             b.Property(x => x.Url).HasMaxLength(2048).IsRequired();
             b.Property(x => x.Secret).HasMaxLength(256);
             b.Property(x => x.TriggerEventsJson).HasColumnType("nvarchar(max)");

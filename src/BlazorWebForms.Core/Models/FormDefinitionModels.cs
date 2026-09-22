@@ -86,6 +86,8 @@ public sealed class FormFieldDefinition
     public string RepeatableAddButtonText { get; set; } = "Add item";
     public int? MinItems { get; set; }
     public int? MaxItems { get; set; }
+    public int? DefaultItems { get; set; }
+    public int? RepeatableColumnsPerItem { get; set; }
     public List<RepeatableListColumnDefinition> RepeatableColumns { get; set; } = [];
     public NumberDisplayKind NumberDisplayKind { get; set; } = NumberDisplayKind.Plain;
     public string NumberUnit { get; set; } = string.Empty;

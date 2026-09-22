@@ -3,6 +3,7 @@ using BlazorWebForms.Infrastructure.SqlServer.Integrations;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace BlazorWebForms.Infrastructure.SqlServer;
@@ -30,7 +31,9 @@ public static class ServiceCollectionExtensions
         // register EF Core DbContext and EF-backed repository (scoped)
         services.AddDbContext<BlazorWebFormsDbContext>(builder =>
             builder.UseSqlServer(options.ConnectionString, sqlOptions =>
-                sqlOptions.EnableRetryOnFailure(maxRetryCount: 5, maxRetryDelay: TimeSpan.FromSeconds(5), errorNumbersToAdd: null)));
+                sqlOptions.EnableRetryOnFailure(maxRetryCount: 5, maxRetryDelay: TimeSpan.FromSeconds(5), errorNumbersToAdd: null))
+                .LogTo(Console.WriteLine, LogLevel.Information)
+                .EnableSensitiveDataLogging());
         services.AddScoped<IFormsRepository, EfFormsRepository>();
 
         services.TryAddSingleton<IFileStorage, LocalFileStorage>();

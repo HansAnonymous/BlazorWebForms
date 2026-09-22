@@ -62,8 +62,13 @@ public sealed class FormsApplicationService(
     {
         var user = currentUserContext.GetCurrentUser();
         var form = formId.HasValue
-            ? await repository.GetFormAsync(formId.Value, cancellationToken)
+            ? await repository.GetFormAsync(formId.Value, cancellationToken, includeArchived: true)
             : CreateEmptyForm(user);
+
+        if (form?.IsArchived == true)
+        {
+            throw new InvalidOperationException("Archived forms cannot be edited.");
+        }
 
         form ??= CreateEmptyForm(user);
 
@@ -79,12 +84,164 @@ public sealed class FormsApplicationService(
         };
     }
 
+    public async Task<IReadOnlyList<FormPermissionGrant>> GetManagePermissionsAsync(Guid formId, CancellationToken cancellationToken = default)
+    {
+        var user = currentUserContext.GetCurrentUser();
+        var form = await repository.GetFormAsync(formId, cancellationToken)
+                   ?? throw new InvalidOperationException("Form not found.");
+
+        if (!permissionEvaluator.CanManageForm(form, user))
+        {
+            throw new InvalidOperationException("Current user cannot view permissions for this form.");
+        }
+
+        EnsureCreatorOwnerGrant(form, user);
+
+        return form.Permissions
+            .Where(p => p.Role is FormPermissionRole.Owner or FormPermissionRole.Manager)
+            .OrderByDescending(p => p.Role == FormPermissionRole.Owner)
+            .ThenBy(p => p.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    public async Task<FormAggregate> UpsertManagePermissionAsync(Guid formId, FormPermissionGrant grant, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(grant);
+
+        var user = currentUserContext.GetCurrentUser();
+        var form = await repository.GetFormAsync(formId, cancellationToken)
+                   ?? throw new InvalidOperationException("Form not found.");
+
+        if (!permissionEvaluator.CanManageForm(form, user))
+        {
+            throw new InvalidOperationException("Current user cannot update permissions for this form.");
+        }
+
+        EnsureCreatorOwnerGrant(form, user);
+
+        var normalizedScopeType = NormalizePermissionScopeType(grant.ScopeType);
+        var normalizedScopeValue = (grant.ScopeValue ?? string.Empty).Trim();
+        var normalizedDisplayName = (grant.DisplayName ?? string.Empty).Trim();
+        var normalizedUserId = grant.UserId;
+
+        if (normalizedScopeType.Equals("UserEmail", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(normalizedScopeValue) || !normalizedScopeValue.Contains('@'))
+            {
+                throw new InvalidOperationException("A valid email address is required for user permission grants.");
+            }
+
+            normalizedScopeValue = normalizedScopeValue.ToLowerInvariant();
+            normalizedUserId = CreateSyntheticScopeUserId(normalizedScopeType, normalizedScopeValue);
+            if (string.IsNullOrWhiteSpace(normalizedDisplayName))
+            {
+                normalizedDisplayName = normalizedScopeValue;
+            }
+        }
+        else if (normalizedScopeType.Equals("Division", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(normalizedScopeValue))
+            {
+                throw new InvalidOperationException("Division code or name is required for division permission grants.");
+            }
+
+            normalizedScopeValue = normalizedScopeValue.Trim();
+            normalizedUserId = CreateSyntheticScopeUserId(normalizedScopeType, normalizedScopeValue);
+            if (string.IsNullOrWhiteSpace(normalizedDisplayName))
+            {
+                normalizedDisplayName = $"Division: {normalizedScopeValue}";
+            }
+        }
+        else
+        {
+            if (normalizedUserId == Guid.Empty)
+            {
+                throw new InvalidOperationException("User id is required for this permission scope.");
+            }
+
+            if (string.IsNullOrWhiteSpace(normalizedDisplayName))
+            {
+                normalizedDisplayName = normalizedUserId.ToString("D");
+            }
+        }
+
+        var role = grant.Role == FormPermissionRole.Owner
+            ? FormPermissionRole.Owner
+            : FormPermissionRole.Manager;
+
+        var existing = form.Permissions.FirstOrDefault(p => p.UserId == normalizedUserId);
+        if (existing is null)
+        {
+            form.Permissions.Add(new FormPermissionGrant
+            {
+                UserId = normalizedUserId,
+                DisplayName = normalizedDisplayName,
+                Role = role,
+                ScopeType = normalizedScopeType,
+                ScopeValue = normalizedScopeValue
+            });
+        }
+        else
+        {
+            existing.DisplayName = normalizedDisplayName;
+            existing.Role = role;
+            existing.ScopeType = normalizedScopeType;
+            existing.ScopeValue = normalizedScopeValue;
+        }
+
+        form.UpdatedUtc = DateTimeOffset.UtcNow;
+        await repository.SaveFormAsync(form, cancellationToken);
+        metadataCache.InvalidateForms();
+        return form;
+    }
+
+    public async Task<FormAggregate> RemoveManagePermissionAsync(Guid formId, Guid permissionUserId, CancellationToken cancellationToken = default)
+    {
+        if (permissionUserId == Guid.Empty)
+        {
+            throw new InvalidOperationException("Permission key is required.");
+        }
+
+        var user = currentUserContext.GetCurrentUser();
+        var form = await repository.GetFormAsync(formId, cancellationToken)
+                   ?? throw new InvalidOperationException("Form not found.");
+
+        if (!permissionEvaluator.CanManageForm(form, user))
+        {
+            throw new InvalidOperationException("Current user cannot update permissions for this form.");
+        }
+
+        EnsureCreatorOwnerGrant(form, user);
+
+        var target = form.Permissions.FirstOrDefault(p => p.UserId == permissionUserId);
+        if (target is null)
+        {
+            return form;
+        }
+
+        if (target.UserId == form.OwnerUserId && target.Role == FormPermissionRole.Owner)
+        {
+            throw new InvalidOperationException("The form creator owner permission cannot be removed.");
+        }
+
+        form.Permissions.Remove(target);
+        form.UpdatedUtc = DateTimeOffset.UtcNow;
+        await repository.SaveFormAsync(form, cancellationToken);
+        metadataCache.InvalidateForms();
+        return form;
+    }
+
     public async Task<FormAggregate> SaveDraftAsync(SaveDraftRequest request, CancellationToken cancellationToken = default)
     {
         var user = currentUserContext.GetCurrentUser();
         var form = request.FormId.HasValue
-            ? await repository.GetFormAsync(request.FormId.Value, cancellationToken)
+            ? await repository.GetFormAsync(request.FormId.Value, cancellationToken, includeArchived: true)
             : null;
+
+        if (form?.IsArchived == true)
+        {
+            throw new InvalidOperationException("Archived forms cannot be edited.");
+        }
 
         form ??= CreateEmptyForm(user);
 
@@ -134,16 +291,17 @@ public sealed class FormsApplicationService(
         foreach (var w in request.Webhooks.Where(w => !string.IsNullOrWhiteSpace(w.Url)))
             form.Webhooks.Add(w);
 
-        if (!form.Permissions.Any())
+        form.Permissions.Clear();
+        foreach (var permission in request.Permissions
+            .Select(NormalizeDraftPermissionGrant)
+            .Where(p => p.UserId != Guid.Empty)
+            .GroupBy(p => p.UserId)
+            .Select(g => g.First()))
         {
-            form.Permissions.Add(new FormPermissionGrant
-            {
-                UserId = user.UserId,
-                DisplayName = user.DisplayName,
-                Role = FormPermissionRole.Owner,
-                ScopeType = "Form"
-            });
+            form.Permissions.Add(permission);
         }
+
+        EnsureCreatorOwnerGrant(form, user);
 
         await repository.SaveFormAsync(form, cancellationToken);
         logger.LogInformation("Form draft saved for FormId {FormId} by UserId {UserId}.", form.Id, user.UserId);
@@ -153,13 +311,18 @@ public sealed class FormsApplicationService(
 
     public async Task<FormVersionRecord> PublishAsync(Guid formId, CancellationToken cancellationToken = default)
     {
-        var form = await repository.GetFormAsync(formId, cancellationToken)
+        var form = await repository.GetFormAsync(formId, cancellationToken, includeArchived: true)
                    ?? throw new InvalidOperationException("Form not found.");
         var user = currentUserContext.GetCurrentUser();
 
         if (!permissionEvaluator.CanManageForm(form, user))
         {
             throw new InvalidOperationException("Current user cannot publish this form.");
+        }
+
+        if (form.IsArchived)
+        {
+            throw new InvalidOperationException("Archived forms cannot be published.");
         }
 
         ValidateDefinitionForPublish(form.DraftDefinition);
@@ -179,6 +342,82 @@ public sealed class FormsApplicationService(
         logger.LogInformation("Form published for FormId {FormId} with Version {VersionNumber} by UserId {UserId}.", form.Id, version.VersionNumber, user.UserId);
         metadataCache.InvalidateForms();
         return version;
+    }
+
+    public async Task ArchiveFormAsync(Guid formId, CancellationToken cancellationToken = default)
+    {
+        var user = currentUserContext.GetCurrentUser();
+        var form = await repository.GetFormAsync(formId, cancellationToken, includeArchived: true)
+                   ?? throw new InvalidOperationException("Form not found.");
+
+        if (!permissionEvaluator.CanManageForm(form, user))
+        {
+            throw new InvalidOperationException("Current user cannot archive this form.");
+        }
+
+        if (form.IsArchived)
+        {
+            throw new InvalidOperationException("Form is already archived.");
+        }
+
+        var archivedUtc = DateTimeOffset.UtcNow;
+        await repository.ArchiveFormAsync(formId, user.UserId, archivedUtc, cancellationToken);
+        metadataCache.InvalidateForms();
+        logger.LogInformation("Form archived for FormId {FormId} by UserId {UserId}.", formId, user.UserId);
+    }
+
+    public async Task RestoreFormAsync(Guid formId, CancellationToken cancellationToken = default)
+    {
+        var user = currentUserContext.GetCurrentUser();
+        var form = await repository.GetFormAsync(formId, cancellationToken, includeArchived: true)
+                   ?? throw new InvalidOperationException("Form not found.");
+
+        if (!permissionEvaluator.CanManageForm(form, user))
+        {
+            throw new InvalidOperationException("Current user cannot restore this form.");
+        }
+
+        if (!form.IsArchived)
+        {
+            throw new InvalidOperationException("Form is not archived.");
+        }
+
+        await repository.RestoreFormAsync(formId, cancellationToken);
+        metadataCache.InvalidateForms();
+        logger.LogInformation("Form restored for FormId {FormId} by UserId {UserId}.", formId, user.UserId);
+    }
+
+    public async Task DeleteFormAsync(Guid formId, CancellationToken cancellationToken = default)
+    {
+        var user = currentUserContext.GetCurrentUser();
+        var form = await repository.GetFormAsync(formId, cancellationToken, includeArchived: true)
+                   ?? throw new InvalidOperationException("Form not found.");
+
+        if (!permissionEvaluator.CanManageForm(form, user))
+        {
+            throw new InvalidOperationException("Current user cannot delete this form.");
+        }
+
+        var storedFiles = await repository.GetStoredFilesAsync(formId, cancellationToken);
+        await repository.DeleteFormAsync(formId, cancellationToken);
+
+        foreach (var relativePath in storedFiles
+            .Select(file => file.RelativePath)
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                await fileStorage.DeleteAsync(relativePath, cancellationToken);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidOperationException)
+            {
+                logger.LogWarning(ex, "Failed to delete stored file {RelativePath} for deleted form {FormId}.", relativePath, formId);
+            }
+        }
+
+        metadataCache.InvalidateForms();
+        logger.LogInformation("Form deleted for FormId {FormId} by UserId {UserId}.", formId, user.UserId);
     }
 
     public async Task<PublishedFormViewModel?> GetPublishedFormAsync(string slug, CancellationToken cancellationToken = default)
@@ -1161,6 +1400,96 @@ public sealed class FormsApplicationService(
         return invitation;
     }
 
+    private static FormPermissionGrant NormalizeDraftPermissionGrant(FormPermissionGrant grant)
+    {
+        var normalizedScopeType = NormalizePermissionScopeType(grant.ScopeType);
+        var normalizedScopeValue = (grant.ScopeValue ?? string.Empty).Trim();
+        var normalizedDisplayName = (grant.DisplayName ?? string.Empty).Trim();
+        var normalizedUserId = grant.UserId;
+
+        if (normalizedScopeType.Equals("UserEmail", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(normalizedScopeValue) || !normalizedScopeValue.Contains('@'))
+            {
+                throw new InvalidOperationException("A valid email address is required for user permission grants.");
+            }
+
+            normalizedScopeValue = normalizedScopeValue.ToLowerInvariant();
+            normalizedUserId = CreateSyntheticScopeUserId(normalizedScopeType, normalizedScopeValue);
+            if (string.IsNullOrWhiteSpace(normalizedDisplayName))
+            {
+                normalizedDisplayName = normalizedScopeValue;
+            }
+        }
+        else if (normalizedScopeType.Equals("Division", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(normalizedScopeValue))
+            {
+                throw new InvalidOperationException("Division code or name is required for division permission grants.");
+            }
+
+            normalizedUserId = CreateSyntheticScopeUserId(normalizedScopeType, normalizedScopeValue);
+            if (string.IsNullOrWhiteSpace(normalizedDisplayName))
+            {
+                normalizedDisplayName = $"Division: {normalizedScopeValue}";
+            }
+        }
+        else if (normalizedUserId == Guid.Empty)
+        {
+            throw new InvalidOperationException("User id is required for this permission scope.");
+        }
+
+        if (string.IsNullOrWhiteSpace(normalizedDisplayName))
+        {
+            normalizedDisplayName = normalizedUserId.ToString("D");
+        }
+
+        return new FormPermissionGrant
+        {
+            UserId = normalizedUserId,
+            DisplayName = normalizedDisplayName,
+            Role = grant.Role,
+            ScopeType = normalizedScopeType,
+            ScopeValue = normalizedScopeValue
+        };
+    }
+
+    private static void EnsureCreatorOwnerGrant(FormAggregate form, UserProfile user)
+    {
+        if (form.Permissions.Any(p => p.UserId == form.OwnerUserId && p.Role == FormPermissionRole.Owner))
+        {
+            return;
+        }
+
+        form.Permissions.Add(new FormPermissionGrant
+        {
+            UserId = form.OwnerUserId,
+            DisplayName = string.IsNullOrWhiteSpace(user.DisplayName) ? "Form owner" : user.DisplayName,
+            Role = FormPermissionRole.Owner,
+            ScopeType = "Form"
+        });
+    }
+
+    private static string NormalizePermissionScopeType(string? scopeType)
+    {
+        var value = string.IsNullOrWhiteSpace(scopeType) ? "Form" : scopeType.Trim();
+        if (value.Equals("Form", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("Global", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("UserEmail", StringComparison.OrdinalIgnoreCase) ||
+            value.Equals("Division", StringComparison.OrdinalIgnoreCase))
+        {
+            return value;
+        }
+
+        throw new InvalidOperationException($"Unsupported permission scope '{value}'.");
+    }
+
+    private static Guid CreateSyntheticScopeUserId(string scopeType, string scopeValue)
+    {
+        var bytes = MD5.HashData(Encoding.UTF8.GetBytes($"formscope:{scopeType}:{scopeValue.ToLowerInvariant()}"));
+        return new Guid(bytes);
+    }
+
     private static FormAggregate CreateEmptyForm(UserProfile user)
     {
         if (!user.IsAuthenticated)
@@ -1171,8 +1500,8 @@ public sealed class FormsApplicationService(
         var form = new FormAggregate
         {
             OwnerUserId = user.UserId,
-            Name = "New form",
-            Description = "Describe purpose, versioning rules, and notification recipients.",
+            Name = "",
+            Description = "",
             Key = $"form-{Guid.NewGuid():N}"
         };
 
@@ -1328,13 +1657,33 @@ public sealed class FormsApplicationService(
                         throw new InvalidOperationException($"Field '{field.Label}' maximum item count must be at least one.");
                     }
 
+                    if (field.DefaultItems is < 0)
+                    {
+                        throw new InvalidOperationException($"Field '{field.Label}' default item count cannot be negative.");
+                    }
+
                     if (field.MinItems.HasValue && field.MaxItems.HasValue && field.MinItems.Value > field.MaxItems.Value)
                     {
                         throw new InvalidOperationException($"Field '{field.Label}' minimum item count cannot exceed maximum item count.");
                     }
 
+                    if (field.DefaultItems.HasValue && field.MaxItems.HasValue && field.DefaultItems.Value > field.MaxItems.Value)
+                    {
+                        throw new InvalidOperationException($"Field '{field.Label}' default item count cannot exceed maximum item count.");
+                    }
+
+                    if (field.RepeatableColumnsPerItem is < 1)
+                    {
+                        throw new InvalidOperationException($"Field '{field.Label}' columns per item must be at least one.");
+                    }
+
                     if (field.RepeatableColumns.Count > 0)
                     {
+                        if (field.RepeatableColumnsPerItem.HasValue && field.RepeatableColumnsPerItem.Value > field.RepeatableColumns.Count)
+                        {
+                            throw new InvalidOperationException($"Field '{field.Label}' columns per item cannot exceed total repeatable columns.");
+                        }
+
                         var columnIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
                         foreach (var column in field.RepeatableColumns)
                         {
@@ -1351,6 +1700,28 @@ public sealed class FormsApplicationService(
                             if (string.IsNullOrWhiteSpace(column.Label))
                             {
                                 throw new InvalidOperationException($"Field '{field.Label}' column '{column.Id}' must have a label.");
+                            }
+
+                            if (column.Kind == RepeatableColumnKind.Select)
+                            {
+                                if (column.Options.Count == 0)
+                                {
+                                    throw new InvalidOperationException($"Field '{field.Label}' select column '{column.Label}' must define at least one option.");
+                                }
+
+                                var optionValues = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                                foreach (var option in column.Options)
+                                {
+                                    if (string.IsNullOrWhiteSpace(option.Value))
+                                    {
+                                        throw new InvalidOperationException($"Field '{field.Label}' select column '{column.Label}' includes an option with empty value.");
+                                    }
+
+                                    if (!optionValues.Add(option.Value))
+                                    {
+                                        throw new InvalidOperationException($"Field '{field.Label}' select column '{column.Label}' contains duplicate option values.");
+                                    }
+                                }
                             }
                         }
                     }
@@ -1774,8 +2145,8 @@ public sealed class FormsApplicationService(
 
     public async Task<FormAnalyticsViewModel?> GetFormAnalyticsAsync(Guid formId, CancellationToken cancellationToken = default)
     {
-        var form = await repository.GetFormAsync(formId, cancellationToken);
-        if (form is null)
+        var form = await repository.GetFormAsync(formId, cancellationToken, includeArchived: true);
+        if (form is null || form.IsArchived)
         {
             return null;
         }

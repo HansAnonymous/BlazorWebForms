@@ -1,3 +1,5 @@
+using System.ComponentModel;
+
 namespace BlazorWebForms.Core.Models;
 
 public enum FormFieldKind
@@ -40,7 +42,10 @@ public enum RepeatableColumnKind
     TextArea,
     Number,
     Date,
-    Checkbox
+    Checkbox,
+    Select,
+    Year,
+    State
 }
 
 public enum PrefillSourceKind
@@ -71,10 +76,15 @@ public enum FormPermissionRole
 
 public enum EntryStatus
 {
+    [Description("Draft")]
     Draft,
+    [Description("Submitted")]
     Submitted,
+    [Description("Needs Approval")]
     NeedsApproval,
+    [Description("Approved")]
     Approved,
+    [Description("Rejected")]
     Rejected
 }
 
@@ -121,12 +131,19 @@ public enum VisibilityRuleOperator
 
 public enum WebhookTriggerEvent
 {
+    [Description("Entry Submitted")]
     EntrySubmitted,
+    [Description("Entry Approved")]
     EntryApproved,
+    [Description("Entry Rejected")]
     EntryRejected,
+    [Description("Step Approved")]
     StepApproved,
+    [Description("Step Rejected")]
     StepRejected,
+    [Description("Step Delegated")]
     StepDelegated,
+    [Description("Entry Resubmitted")]
     EntryResubmitted
 }
 

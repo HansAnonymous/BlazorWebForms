@@ -1,3 +1,4 @@
+namespace BlazorWebForms.Core.Tests;
 using BlazorWebForms.Core.Abstractions;
 using BlazorWebForms.Core.Models;
 using BlazorWebForms.Core.Services;
