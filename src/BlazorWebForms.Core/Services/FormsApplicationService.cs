@@ -902,10 +902,14 @@ public sealed class FormsApplicationService(
 
         await repository.SaveEntryAsync(entry, cancellationToken);
         metadataCache.InvalidateForms();
+        await webhookDispatcher.DispatchAsync(form, WebhookTriggerEvent.StepApproved, entry, cancellationToken);
+
         if (entry.Status == EntryStatus.Approved)
         {
+            await webhookDispatcher.DispatchAsync(form, WebhookTriggerEvent.EntryApproved, entry, cancellationToken);
             await emailNotifier.NotifyEntryApprovedAsync(form, entry, cancellationToken);
         }
+
         return entry;
     }
 
@@ -941,6 +945,8 @@ public sealed class FormsApplicationService(
 
         await repository.SaveEntryAsync(entry, cancellationToken);
         metadataCache.InvalidateForms();
+        await webhookDispatcher.DispatchAsync(form, WebhookTriggerEvent.StepRejected, entry, cancellationToken);
+        await webhookDispatcher.DispatchAsync(form, WebhookTriggerEvent.EntryRejected, entry, cancellationToken);
         await emailNotifier.NotifyEntryRejectedAsync(form, entry, step, cancellationToken);
         return entry;
     }
@@ -1000,10 +1006,13 @@ public sealed class FormsApplicationService(
 
         await repository.SaveEntryAsync(entry, cancellationToken);
         metadataCache.InvalidateForms();
+        await webhookDispatcher.DispatchAsync(form, WebhookTriggerEvent.EntryResubmitted, entry, cancellationToken);
+
         if (entry.ApprovalSteps.Count > 0)
         {
             await NotifyPendingApproverAssignmentsAsync(form, entry, cancellationToken);
         }
+
         return entry;
     }
 
