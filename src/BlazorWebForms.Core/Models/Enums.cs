@@ -120,13 +120,13 @@ public enum VisibilityRuleOperator
     Equals,
     NotEquals,
     Contains,
+    NotContains,
     Empty,
     NotEmpty,
     StartsWith,
     EndsWith,
     GreaterThan,
-    LessThan,
-    NotContains
+    LessThan
 }
 
 public enum WebhookTriggerEvent
