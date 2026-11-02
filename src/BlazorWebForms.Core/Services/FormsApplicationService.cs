@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace BlazorWebForms.Core.Services;
@@ -631,6 +632,8 @@ public sealed class FormsApplicationService(
                       ?? throw new InvalidOperationException("Form has not been published.");
 
         var definition = serializer.Deserialize(version.DefinitionJson);
+        var templatedEnabled = IsTemplatedFormEnabled(definition);
+
         EntryRecord? draft = null;
         if (request.DraftEntryId.HasValue)
         {
@@ -639,6 +642,25 @@ public sealed class FormsApplicationService(
                 !string.Equals(draft.SubmittedByEmail, user.Email, StringComparison.OrdinalIgnoreCase))
             {
                 throw new InvalidOperationException("Draft submission was not found for current user.");
+            }
+        }
+
+        var normalizedAnswers = new Dictionary<string, string?>(request.Answers, StringComparer.OrdinalIgnoreCase);
+        if (templatedEnabled)
+        {
+            PreserveTemplatedMetadata(draft?.Answers, normalizedAnswers);
+            EnsureTemplatedInitiatorMetadata(normalizedAnswers, user);
+            EnforceTemplatedFieldPermissions(definition, user, normalizedAnswers, draft?.Answers);
+
+            var recipientEmail = ResolveTemplatedMetadataValue(normalizedAnswers, draft?.Answers, TemplatedRecipientEmailKey);
+            if (string.IsNullOrWhiteSpace(recipientEmail))
+            {
+                throw new InvalidOperationException("Templated forms must be handed off to a recipient before submission.");
+            }
+
+            if (!string.Equals(recipientEmail, user.Email, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new InvalidOperationException("Only the handoff recipient can submit this templated form.");
             }
         }
 
@@ -657,7 +679,7 @@ public sealed class FormsApplicationService(
         entry.SubmittedByEmail = user.Email;
         entry.SubmittedUtc = DateTimeOffset.UtcNow;
         entry.StartedUtc = request.StartedUtc ?? entry.StartedUtc;
-        entry.Answers = new Dictionary<string, string?>(request.Answers, StringComparer.OrdinalIgnoreCase);
+        entry.Answers = new Dictionary<string, string?>(normalizedAnswers, StringComparer.OrdinalIgnoreCase);
 
         // ── Formula / calculated fields ──────────────────────────────────────
         ApplyFormulaFields(definition, entry.Answers);
@@ -749,19 +771,29 @@ public sealed class FormsApplicationService(
             Status = EntryStatus.Draft
         };
 
+        var definition = serializer.Deserialize(version.DefinitionJson);
+        var templatedEnabled = IsTemplatedFormEnabled(definition);
+
+        var normalizedAnswers = new Dictionary<string, string?>(request.Answers, StringComparer.OrdinalIgnoreCase);
+        if (templatedEnabled)
+        {
+            PreserveTemplatedMetadata(entry.Answers, normalizedAnswers);
+            EnsureTemplatedInitiatorMetadata(normalizedAnswers, user);
+            EnforceTemplatedFieldPermissions(definition, user, normalizedAnswers, entry.Answers);
+        }
+
         entry.FormVersionId = version.Id;
         entry.SubmittedBy = user.DisplayName;
         entry.SubmittedByEmail = user.Email;
         entry.SubmittedUtc = DateTimeOffset.UtcNow;
         entry.Status = EntryStatus.Draft;
-        entry.Answers = new Dictionary<string, string?>(request.Answers, StringComparer.OrdinalIgnoreCase);
+        entry.Answers = new Dictionary<string, string?>(normalizedAnswers, StringComparer.OrdinalIgnoreCase);
         entry.SearchIndex = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var revisionNumber = entry.Revisions.Count + 1;
 
         entry.Files = EntryFileMapper.MapFiles(request.Files, user.UserId, user.Email, revisionNumber);
         EntryFileMapper.ApplyFileAnswers(entry.Answers, request.Files);
 
-        var definition = serializer.Deserialize(version.DefinitionJson);
         entry.SearchIndex = SearchIndexBuilder.Build(definition, entry.Answers);
 
         entry.ApprovalSteps = request.Approvers
@@ -790,6 +822,74 @@ public sealed class FormsApplicationService(
             await NotifyPendingApproverAssignmentsAsync(form, entry, cancellationToken);
         }
         return entry;
+    }
+
+    public async Task<EntryRecord> TransferDraftSubmissionAsync(Guid formId, TransferDraftSubmissionRequest request, CancellationToken cancellationToken = default)
+    {
+        var form = await repository.GetFormAsync(formId, cancellationToken)
+                   ?? throw new InvalidOperationException("Form not found.");
+        var user = currentUserContext.GetCurrentUser();
+
+        if (!permissionEvaluator.CanSubmitForm(form, user))
+        {
+            throw new InvalidOperationException("Current user cannot transfer draft submissions for this form.");
+        }
+
+        var version = form.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault()
+                      ?? throw new InvalidOperationException("Form has not been published.");
+        var definition = serializer.Deserialize(version.DefinitionJson);
+        if (!IsTemplatedFormEnabled(definition))
+        {
+            throw new InvalidOperationException("Draft handoff is only available when templated mode is enabled.");
+        }
+
+        var draft = await repository.GetEntryAsync(request.DraftEntryId, cancellationToken)
+                    ?? throw new InvalidOperationException("Draft submission not found.");
+
+        if (draft.FormId != formId || draft.Status != EntryStatus.Draft ||
+            !string.Equals(draft.SubmittedByEmail, user.Email, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Draft submission is not accessible to current user.");
+        }
+
+        var recipientEmail = (request.RecipientEmail ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(recipientEmail) || !recipientEmail.Contains('@'))
+        {
+            throw new InvalidOperationException("A valid recipient email is required.");
+        }
+
+        recipientEmail = recipientEmail.ToLowerInvariant();
+        if (string.Equals(recipientEmail, user.Email, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("Recipient must be a different user.");
+        }
+
+        draft.Answers ??= new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        draft.Answers[TemplatedInitiatorEmailKey] = user.Email;
+        draft.Answers[TemplatedInitiatorNameKey] = user.DisplayName;
+        draft.Answers[TemplatedRecipientEmailKey] = recipientEmail;
+        draft.Answers["__templated.recipientName"] = string.IsNullOrWhiteSpace(request.RecipientDisplayName)
+            ? recipientEmail
+            : request.RecipientDisplayName.Trim();
+        draft.Answers["__templated.handoffUtc"] = DateTimeOffset.UtcNow.ToString("O");
+
+        draft.SubmittedByEmail = recipientEmail;
+        draft.SubmittedBy = string.IsNullOrWhiteSpace(request.RecipientDisplayName)
+            ? recipientEmail
+            : request.RecipientDisplayName.Trim();
+        draft.SubmittedUtc = DateTimeOffset.UtcNow;
+
+        draft.Revisions.Add(new EntryRevisionRecord
+        {
+            RevisionNumber = draft.Revisions.Count + 1,
+            EditedBy = user.DisplayName,
+            EditedUtc = draft.SubmittedUtc,
+            Answers = new Dictionary<string, string?>(draft.Answers, StringComparer.OrdinalIgnoreCase)
+        });
+
+        await repository.SaveEntryAsync(draft, cancellationToken);
+        metadataCache.InvalidateForms();
+        return draft;
     }
 
     public async Task<EntryRecord?> GetDraftSubmissionAsync(Guid formId, CancellationToken cancellationToken = default)
@@ -2166,6 +2266,182 @@ public sealed class FormsApplicationService(
         }
         var summary = await analyticsStore.GetSummaryAsync(formId, cancellationToken);
         return new FormAnalyticsViewModel { Form = form, Summary = summary };
+    }
+
+    private const string FormSettingsMetadataKey = "form.settings";
+    private const string FieldSettingsMetadataKey = "field.settings";
+    private const string TemplatedInitiatorEmailKey = "__templated.initiatorEmail";
+    private const string TemplatedInitiatorNameKey = "__templated.initiatorName";
+    private const string TemplatedRecipientEmailKey = "__templated.recipientEmail";
+    private static readonly string[] TemplatedMetadataKeys =
+    [
+        TemplatedInitiatorEmailKey,
+        TemplatedInitiatorNameKey,
+        TemplatedRecipientEmailKey,
+        "__templated.recipientName",
+        "__templated.handoffUtc"
+    ];
+
+    private static bool IsTemplatedFormEnabled(FormDefinition definition)
+    {
+        if (!definition.Metadata.TryGetValue(FormSettingsMetadataKey, out var settingsJson) || string.IsNullOrWhiteSpace(settingsJson))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(settingsJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (root.TryGetProperty("templatedFormEnabled", out var camelCaseFlag) && camelCaseFlag.ValueKind == JsonValueKind.True)
+            {
+                return true;
+            }
+
+            if (root.TryGetProperty("TemplatedFormEnabled", out var pascalCaseFlag) && pascalCaseFlag.ValueKind == JsonValueKind.True)
+            {
+                return true;
+            }
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+
+        return false;
+    }
+
+    private static string GetFieldEditableBy(FormFieldDefinition field)
+    {
+        if (field.Metadata is null || !field.Metadata.TryGetValue(FieldSettingsMetadataKey, out var fieldSettingsJson) || string.IsNullOrWhiteSpace(fieldSettingsJson))
+        {
+            return "Any";
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(fieldSettingsJson);
+            var root = doc.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                return "Any";
+            }
+
+            if (root.TryGetProperty("editableBy", out var editableByValue) && editableByValue.ValueKind == JsonValueKind.String)
+            {
+                var editableBy = editableByValue.GetString();
+                return string.IsNullOrWhiteSpace(editableBy) ? "Any" : editableBy.Trim();
+            }
+
+            if (root.TryGetProperty("EditableBy", out var pascalEditableByValue) && pascalEditableByValue.ValueKind == JsonValueKind.String)
+            {
+                var editableBy = pascalEditableByValue.GetString();
+                return string.IsNullOrWhiteSpace(editableBy) ? "Any" : editableBy.Trim();
+            }
+        }
+        catch (JsonException)
+        {
+            return "Any";
+        }
+
+        return "Any";
+    }
+
+    private static void PreserveTemplatedMetadata(IReadOnlyDictionary<string, string?>? sourceAnswers, IDictionary<string, string?> targetAnswers)
+    {
+        if (sourceAnswers is null)
+        {
+            return;
+        }
+
+        foreach (var key in TemplatedMetadataKeys)
+        {
+            if (!targetAnswers.ContainsKey(key) && sourceAnswers.TryGetValue(key, out var value))
+            {
+                targetAnswers[key] = value;
+            }
+        }
+    }
+
+    private static string ResolveTemplatedMetadataValue(IReadOnlyDictionary<string, string?> primary, IReadOnlyDictionary<string, string?>? fallback, string key)
+    {
+        if (primary.TryGetValue(key, out var primaryValue) && !string.IsNullOrWhiteSpace(primaryValue))
+        {
+            return primaryValue.Trim();
+        }
+
+        if (fallback is not null && fallback.TryGetValue(key, out var fallbackValue) && !string.IsNullOrWhiteSpace(fallbackValue))
+        {
+            return fallbackValue.Trim();
+        }
+
+        return string.Empty;
+    }
+
+    private static void EnsureTemplatedInitiatorMetadata(IDictionary<string, string?> answers, UserProfile user)
+    {
+        if (!answers.TryGetValue(TemplatedInitiatorEmailKey, out var initiatorEmail) || string.IsNullOrWhiteSpace(initiatorEmail))
+        {
+            answers[TemplatedInitiatorEmailKey] = user.Email;
+        }
+
+        if (!answers.TryGetValue(TemplatedInitiatorNameKey, out var initiatorName) || string.IsNullOrWhiteSpace(initiatorName))
+        {
+            answers[TemplatedInitiatorNameKey] = user.DisplayName;
+        }
+    }
+
+    private static string ResolveTemplatedActorRole(UserProfile user, IReadOnlyDictionary<string, string?> incomingAnswers, IReadOnlyDictionary<string, string?>? baselineAnswers)
+    {
+        var recipientEmail = ResolveTemplatedMetadataValue(incomingAnswers, baselineAnswers, TemplatedRecipientEmailKey);
+        if (!string.IsNullOrWhiteSpace(recipientEmail) && string.Equals(recipientEmail, user.Email, StringComparison.OrdinalIgnoreCase))
+        {
+            return "Recipient";
+        }
+
+        return "Initiator";
+    }
+
+    private static bool CanEditFieldForRole(string editableBy, string actorRole)
+        => string.Equals(editableBy, "Any", StringComparison.OrdinalIgnoreCase)
+           || string.Equals(editableBy, actorRole, StringComparison.OrdinalIgnoreCase);
+
+    private static string? NormalizeFieldValue(string? value)
+        => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static void EnforceTemplatedFieldPermissions(
+        FormDefinition definition,
+        UserProfile user,
+        IReadOnlyDictionary<string, string?> incomingAnswers,
+        IReadOnlyDictionary<string, string?>? baselineAnswers)
+    {
+        var actorRole = ResolveTemplatedActorRole(user, incomingAnswers, baselineAnswers);
+        foreach (var field in definition.Sections.SelectMany(section => section.Fields))
+        {
+            var editableBy = GetFieldEditableBy(field);
+            if (CanEditFieldForRole(editableBy, actorRole))
+            {
+                continue;
+            }
+
+            incomingAnswers.TryGetValue(field.Id, out var incomingValue);
+            string? baselineValue = null;
+            if (baselineAnswers is not null)
+            {
+                baselineAnswers.TryGetValue(field.Id, out baselineValue);
+            }
+
+            if (!string.Equals(NormalizeFieldValue(incomingValue), NormalizeFieldValue(baselineValue), StringComparison.Ordinal))
+            {
+                var label = string.IsNullOrWhiteSpace(field.Label) ? field.Id : field.Label;
+                throw new InvalidOperationException($"Field '{label}' is not editable by the current user in templated workflow.");
+            }
+        }
     }
 
     // ── Formula field helpers ────────────────────────────────────────────────

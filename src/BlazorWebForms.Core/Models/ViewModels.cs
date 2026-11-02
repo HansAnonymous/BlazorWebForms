@@ -84,6 +84,13 @@ public sealed class SaveDraftSubmissionRequest
     public List<SubmittedFileInput> Files { get; set; } = [];
 }
 
+public sealed class TransferDraftSubmissionRequest
+{
+    public Guid DraftEntryId { get; set; }
+    public string RecipientEmail { get; set; } = string.Empty;
+    public string RecipientDisplayName { get; set; } = string.Empty;
+}
+
 public sealed class FormPrefillRequest
 {
     public required FormDefinition Definition { get; init; }
