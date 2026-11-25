@@ -36,6 +36,62 @@ var dashboard = await forms.GetDashboardAsync();
 Assert(dashboard.Forms.Count > 0, "Seed creates demo form.");
 Assert(dashboard.RecentEntries.Count > 0, "Seed creates demo entry.");
 
+if (args.Contains("--handoff-concurrency"))
+{
+    try
+    {
+    var source = dashboard.Forms.First(f => f.Versions.Count > 0);
+    var entry = new EntryRecord { FormId = source.Id, FormVersionId = source.Versions[0].Id, Status = EntryStatus.Draft, SubmittedByEmail = "first@example.com", Answers = new() { ["__handoff.stepId"] = "first" } };
+    await repository.SaveEntryAsync(entry);
+    Assert(entry.ConcurrencyToken?.Length == 8, "SQL insertion returns rowversion token.");
+    await using var scope1 = provider.CreateAsyncScope();
+    await using var scope2 = provider.CreateAsyncScope();
+    var repo1 = scope1.ServiceProvider.GetRequiredService<IFormsRepository>();
+    var repo2 = scope2.ServiceProvider.GetRequiredService<IFormsRepository>();
+    var first = (await repo1.GetEntryAsync(entry.Id))!;
+    var stale = (await repo2.GetEntryAsync(entry.Id))!;
+    var firstToken = first.ConcurrencyToken!.ToArray();
+    var staleToken = stale.ConcurrencyToken!.ToArray();
+    first.SubmittedByEmail = "second@example.com";
+    first.Answers["__handoff.stepId"] = "second";
+    await repo1.SaveDraftEntryIfUnchangedAsync(first, firstToken);
+    Assert(!first.ConcurrencyToken!.SequenceEqual(firstToken), "SQL successful CAS refreshes token.");
+    stale.Answers["spoof"] = "stale";
+    await AssertThrowsAsync(() => repo2.SaveDraftEntryIfUnchangedAsync(stale, staleToken), "SQL rejects stale writer.");
+    var persisted = (await repository.GetEntryAsync(entry.Id))!;
+    Assert(persisted.SubmittedByEmail == "second@example.com" && persisted.Answers["__handoff.stepId"] == "second" && !persisted.Answers.ContainsKey("spoof"), "Stale SQL write leaves ownership and answers unchanged.");
+    persisted.Status = EntryStatus.Submitted;
+    await repo1.SaveDraftEntryIfUnchangedAsync(persisted, persisted.ConcurrencyToken!);
+    await AssertThrowsAsync(() => repo2.SaveDraftEntryIfUnchangedAsync(stale, staleToken), "SQL does not recreate or overwrite finalized draft.");
+    var simultaneous = new EntryRecord { FormId = source.Id, FormVersionId = source.Versions[0].Id, Status = EntryStatus.Draft, SubmittedByEmail = "first@example.com" };
+    await repository.SaveEntryAsync(simultaneous);
+    var writer1 = (await repo1.GetEntryAsync(simultaneous.Id))!;
+    var writer2 = (await repo2.GetEntryAsync(simultaneous.Id))!;
+    writer1.SubmittedByEmail = "second@example.com";
+    writer2.Answers["stale"] = "save";
+    var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+    async Task<bool> Compete(IFormsRepository repo, EntryRecord candidate)
+    {
+        await gate.Task;
+        try { await repo.SaveDraftEntryIfUnchangedAsync(candidate, candidate.ConcurrencyToken!); return true; }
+        catch (InvalidOperationException) { return false; }
+    }
+    var race1 = Compete(repo1, writer1);
+    var race2 = Compete(repo2, writer2);
+    gate.SetResult();
+    var results = await Task.WhenAll(race1, race2);
+    Assert(results.Count(x => x) == 1, "Concurrent SQL writes have exactly one winner.");
+    var winner = (await repository.GetEntryAsync(simultaneous.Id))!;
+    Assert(results[0] ? winner.SubmittedByEmail == "second@example.com" && !winner.Answers.ContainsKey("stale") : winner.SubmittedByEmail == "first@example.com" && winner.Answers["stale"] == "save", "SQL losing write leaves no partial changes.");
+    Console.WriteLine("SQL handoff concurrency tests passed.");
+    }
+    finally
+    {
+        await provider.GetRequiredService<BlazorWebFormsDbContext>().Database.EnsureDeletedAsync();
+    }
+    return;
+}
+
 var script = schema.GetCreateScript();
 Assert(script.Contains("[forms].[Forms]"), "Schema descriptor includes forms table.");
 Assert(script.Contains("[forms].[ApprovalSteps]"), "Schema descriptor includes approval steps table.");

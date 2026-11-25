@@ -26,7 +26,8 @@ public enum FormFieldKind
     /// <summary>Matrix/grid where each row accepts a single selection from the configured columns.</summary>
     MatrixSingle,
     /// <summary>Matrix/grid where each row accepts multiple selections from the configured columns.</summary>
-    MatrixMulti
+    MatrixMulti,
+    Duration
 }
 
 public enum NumberDisplayKind
@@ -164,6 +165,17 @@ public enum ApprovalAuditAction
     GraphApproverReminder,
     StepDelegated,
     WebhookDispatched
+}
+
+/// <summary>Describes the purpose of a form definition.</summary>
+public enum FormType
+{
+    /// <summary>A standard form that collects, saves, and submits responses.</summary>
+    [Description("Standard form")]
+    Standard,
+    /// <summary>An instructional guide that presents content only; it never accepts drafts or submissions.</summary>
+    [Description("Instructional guide")]
+    Guide
 }
 
 /// <summary>Controls how a form's sections are presented to the submitter.</summary>

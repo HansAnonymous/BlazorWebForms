@@ -43,6 +43,12 @@ FormsApplicationService          ← single entry point for all operations
 
 Core has **no dependency** on any database, email provider, or UI framework. Every integration point is an interface you can swap.
 
+### Duration fields and temporal formatting
+
+`FormFieldKind.Duration` stores a `DateRangeValue` as JSON with ISO `start`/`end` dates. Drafts may contain partial ranges; submissions, revisions, resubmissions, and required handoff fields require complete ranges with end on or after start. Existing enum values are unchanged.
+
+`TemporalFieldHelper` provides shared calendar-based duration and date formatting. Field metadata `date.format` selects a supported date display pattern; `duration.format` supports `years-months`, `years-months-days`, `months`, `days`, or `range`. Formatting does not alter the stored dates. Hosts render a Duration field using two date inputs and the selected format.
+
 ---
 
 ## Quick Start
@@ -198,3 +204,47 @@ dotnet run --project tests/BlazorWebForms.Infrastructure.SqlServer.Tests -c Debu
 
 [AGPL-3.0-only](LICENSE). Commercial licensing inquiries: open an issue.
 
+
+
+### Draft handoff metadata
+
+A published definition enables handoff with `form.settings` JSON `templatedFormEnabled: true`.
+Optional `handoffSteps` is an ordered array of `{ "id": "...", "name": "..." }` objects.
+Omit it or use an empty array for the legacy initiator/recipient workflow; a non-empty
+array must contain at least two unique, nonblank IDs and nonblank names. IDs must not
+have leading or trailing whitespace. Invalid configurations fail closed.
+
+For dynamic handoff, `field.settings` JSON `editableBy` accepts `Any` or `Step:<id>`;
+legacy `Initiator` and `Recipient` map to the first and last steps respectively.
+The server owns all `__handoff.*` and `__templated.*` answer keys; in particular,
+`__handoff.stepId` identifies the current step. Clients cannot set or clear them.
+New drafts reject non-empty answers and file inputs for fields not editable at the
+first step, including untrusted defaults/prefill. Privileged manager prefill is a
+separate operation. Calculated and hidden fields with a formula are recomputed by the
+server, regardless of client-supplied values or stage edit permissions. Transfer advances exactly one step to the supplied email; only
+the last step can submit. Visible, required current-step fields must have nonblank
+answers before advancing or submitting; this is not full type-specific validation.
+Workflow drafts remain protected from mutation after a new version is published until
+`UpgradeHandoffDraftAsync(formId, draftId, expectedVersionId)` upgrades them. Only the
+assigned authenticated participant can upgrade. The check requires unchanged existing
+question definitions and stage order, and no unmet required questions for completed
+stages. Incompatible upgrades return a reason without changing the original draft;
+concurrent changes are rejected. Clients must save before transferring and must stop
+saving once transferred.
+
+`GetDraftSubmissionAsync(formId, draftEntryId, cancellationToken)` selects an owned
+draft by ID; the existing overload continues to return the latest owned draft for a
+form. Pass `DraftEntryId` on subsequent saves, submissions and transfers. No-ID saves
+continue to reuse the latest draft unless `StartNew` is explicitly set. A fresh draft
+can specify `ExpectedFormVersionId` to reject a concurrently republished form. Hosts
+can configure SQL infrastructure `HandoffFormUrlTemplate`, for example
+`https://example.test/forms/{slug}?draftId={draftId}`, to include a draft-specific URL
+in handoff notifications; the host must map the URL to the ID overload. Without the
+template, the message includes the draft ID but no URL. Notifications are attempted
+after persistence: failures are logged and do not reverse or report a failed transfer;
+there is currently no durable notification retry/outbox.
+
+Workflow saves, transfers, submissions, and upgrades use the repository's atomic
+`SaveDraftEntryIfUnchangedAsync` compare-and-swap operation. The SQL implementation
+uses the entry rowversion to reject stale writers, including across hosts. Other
+repository implementations must provide the same atomic concurrency guarantee.

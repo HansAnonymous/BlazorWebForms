@@ -144,13 +144,65 @@ internal sealed class TemplateEmailNotifier(
             $"Invitation for {invitation.Email} was revoked.", cancellationToken);
     }
 
+    public Task NotifyDraftHandedOffAsync(FormAggregate form, EntryRecord draft, string recipientEmail, CancellationToken cancellationToken = default)
+    {
+        if (!options.EnableOutboundEmail)
+        {
+            return Task.CompletedTask;
+        }
+
+        var subject = $"Form handoff: {form.Name}";
+        if (!string.IsNullOrWhiteSpace(options.HandoffFormUrlTemplate) && !options.HandoffFormUrlTemplate.Contains("{draftId}", StringComparison.Ordinal))
+            throw new InvalidOperationException("HandoffFormUrlTemplate must include {draftId}.");
+        var link = options.HandoffFormUrlTemplate
+            .Replace("{slug}", Uri.EscapeDataString(form.Publication.Slug), StringComparison.Ordinal)
+            .Replace("{draftId}", draft.Id.ToString(), StringComparison.Ordinal);
+        var body = $"A draft for '{form.Name}' has been handed off to you. Draft ID: {draft.Id}.";
+        if (!string.IsNullOrWhiteSpace(link)) body += $" Open: {link}";
+
+        return SendWithRetryAsync(
+            $"handoff:{draft.Id}:{draft.Revisions.Count}:{recipientEmail}",
+            recipientEmail,
+            subject,
+            body,
+            cancellationToken);
+    }
+
+    public async Task<HandoffNotificationOutcome> NotifyDraftHandedOffWithResultAsync(FormAggregate form, EntryRecord draft, string recipientEmail, CancellationToken cancellationToken = default)
+    {
+        if (!options.EnableOutboundEmail) return HandoffNotificationOutcome.Disabled;
+        await NotifyDraftHandedOffAsync(form, draft, recipientEmail, cancellationToken);
+        return HandoffNotificationOutcome.Sent;
+    }
+
     private async Task<string?> SendWithRetryAsync(string key, string subject, string body, CancellationToken cancellationToken)
     {
-        return await SendWithRetryAsync(key, subject, body, null, cancellationToken);
+        return await SendWithRetryAsync(key, "integration@example.com", subject, body, null, cancellationToken);
     }
 
     private async Task<string?> SendWithRetryAsync(
         string key,
+        string recipient,
+        string subject,
+        string body,
+        CancellationToken cancellationToken)
+    {
+        return await SendWithRetryAsync(key, recipient, subject, body, null, cancellationToken);
+    }
+
+    private async Task<string?> SendWithRetryAsync(
+        string key,
+        string subject,
+        string body,
+        Func<CancellationToken, Task<string?>>? afterSend,
+        CancellationToken cancellationToken)
+    {
+        return await SendWithRetryAsync(key, "integration@example.com", subject, body, afterSend, cancellationToken);
+    }
+
+    private async Task<string?> SendWithRetryAsync(
+        string key,
+        string recipient,
         string subject,
         string body,
         Func<CancellationToken, Task<string?>>? afterSend,
@@ -167,8 +219,8 @@ internal sealed class TemplateEmailNotifier(
         {
             try
             {
-                await antiAbuseGuard.CheckOutboundNotificationAllowedAsync("email", "integration@example.com", cancellationToken);
-                await emailIntegration.SendAsync("integration@example.com", subject, body, cancellationToken);
+                await antiAbuseGuard.CheckOutboundNotificationAllowedAsync("email", recipient, cancellationToken);
+                await emailIntegration.SendAsync(recipient, subject, body, cancellationToken);
                 telemetry.TrackEmailDelivery("email", success: true);
                 if (afterSend is not null)
                 {
@@ -194,6 +246,7 @@ internal sealed class TemplateEmailNotifier(
             }
         }
 
+        sentKeys.Remove(key);
         logger.LogError(last, "Email delivery failed after {RetryCount} attempts for key {NotificationKey}.", options.EmailRetryCount, key);
         throw new InvalidOperationException(
             $"Email delivery failed after {options.EmailRetryCount} attempt(s) for key '{key}'.",

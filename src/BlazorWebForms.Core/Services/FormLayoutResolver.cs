@@ -20,6 +20,16 @@ public static class FormLayoutResolver
         };
     }
 
+    public static int ResolveFieldGridColumns(FormFieldDefinition field, FormSectionDefinition section) =>
+        ResolveFieldWidthHint(field) switch
+        {
+            "Half" => 6,
+            "Third" => 4,
+            "TwoThirds" => 8,
+            "Full" => 12,
+            _ => 12 / ResolveSectionColumns(section)
+        };
+
     public static string ResolveFieldWidthHint(FormFieldDefinition field)
     {
         var hint = field.Layout?.WidthHint;

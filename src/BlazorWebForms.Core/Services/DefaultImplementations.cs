@@ -307,6 +307,7 @@ public static class ResponsePipeHelper
             Title = Pipe(definition.Title, answers),
             Description = Pipe(definition.Description, answers),
             DefaultCulture = definition.DefaultCulture,
+            FormType = definition.FormType,
             Branding = definition.Branding,
             LocalizedTitles = definition.LocalizedTitles,
             LocalizedDescriptions = definition.LocalizedDescriptions,

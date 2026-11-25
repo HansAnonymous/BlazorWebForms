@@ -65,4 +65,15 @@ internal sealed class MemoryEmailNotifier : IEmailNotifier
         Messages.Add($"Invitation revoked for '{invitation.Email}' on form '{form.Name}'.");
         return Task.CompletedTask;
     }
+
+    public Task NotifyDraftHandedOffAsync(FormAggregate form, EntryRecord draft, string recipientEmail, CancellationToken cancellationToken = default)
+    {
+        Messages.Add($"Draft handoff notification for '{recipientEmail}' on form '{form.Name}'. Draft '{draft.Id}'.");
+        return Task.CompletedTask;
+    }
+    public async Task<HandoffNotificationOutcome> NotifyDraftHandedOffWithResultAsync(FormAggregate form, EntryRecord draft, string recipientEmail, CancellationToken cancellationToken = default)
+    {
+        await NotifyDraftHandedOffAsync(form, draft, recipientEmail, cancellationToken);
+        return HandoffNotificationOutcome.Sent;
+    }
 }

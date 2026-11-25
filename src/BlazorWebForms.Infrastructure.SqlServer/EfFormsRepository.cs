@@ -1056,7 +1056,17 @@ internal sealed class EfFormsRepository : IFormsRepository
         return entity is null ? null : ToEntryRecord(entity);
     }
 
-    public async Task SaveEntryAsync(EntryRecord entry, CancellationToken cancellationToken = default)
+    public Task SaveEntryAsync(EntryRecord entry, CancellationToken cancellationToken = default) =>
+        SaveEntryCoreAsync(entry, null, cancellationToken);
+
+    public Task SaveDraftEntryIfUnchangedAsync(EntryRecord entry, byte[] expectedToken, CancellationToken cancellationToken = default)
+    {
+        if (expectedToken is null || expectedToken.Length != 8)
+            throw new InvalidOperationException("The draft has no valid concurrency token. Reload and retry.");
+        return SaveEntryCoreAsync(entry, expectedToken, cancellationToken);
+    }
+
+    private async Task SaveEntryCoreAsync(EntryRecord entry, byte[]? expectedToken, CancellationToken cancellationToken)
     {
         db.ChangeTracker.Clear();
         var strategy = db.Database.CreateExecutionStrategy();
@@ -1072,6 +1082,14 @@ internal sealed class EfFormsRepository : IFormsRepository
                 .AsSplitQuery()
                 .FirstOrDefaultAsync(e => e.Id == entry.Id, cancellationToken);
 
+            if (expectedToken is not null)
+            {
+                if (existing is null || existing.Status != (int)EntryStatus.Draft)
+                    throw new InvalidOperationException("The draft was changed by another request. Reload and retry.");
+                db.Entry(existing).Property(x => x.RowVersion).OriginalValue = expectedToken;
+                // Force the rowversion predicate even if all scalar values are unchanged.
+                db.Entry(existing).Property(x => x.SubmittedUtc).IsModified = true;
+            }
             if (existing is null)
             {
                 existing = new EntryEntity { Id = entry.Id };
@@ -1269,6 +1287,7 @@ internal sealed class EfFormsRepository : IFormsRepository
             }
 
             await transaction.CommitAsync(cancellationToken);
+            entry.ConcurrencyToken = existing.RowVersion.ToArray();
         });
     }
 
@@ -1462,6 +1481,7 @@ internal sealed class EfFormsRepository : IFormsRepository
             Id = entity.Id,
             FormId = entity.FormId,
             FormVersionId = entity.FormVersionId,
+            ConcurrencyToken = entity.RowVersion.ToArray(),
             SubmittedBy = entity.SubmittedBy,
             SubmittedByEmail = entity.SubmittedByEmail,
             SubmittedUtc = entity.SubmittedUtc,

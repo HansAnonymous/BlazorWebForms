@@ -79,6 +79,10 @@ public sealed class SubmitEntryRequest
 public sealed class SaveDraftSubmissionRequest
 {
     public Guid? DraftEntryId { get; set; }
+    /// <summary>Create a separate draft rather than resuming the current user's most recent draft.</summary>
+    public bool StartNew { get; set; }
+    /// <summary>When provided, reject the save if a different form version is now published.</summary>
+    public Guid? ExpectedFormVersionId { get; set; }
     public Dictionary<string, string?> Answers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<ApproverInput> Approvers { get; set; } = [];
     public List<SubmittedFileInput> Files { get; set; } = [];
@@ -89,6 +93,20 @@ public sealed class TransferDraftSubmissionRequest
     public Guid DraftEntryId { get; set; }
     public string RecipientEmail { get; set; } = string.Empty;
     public string RecipientDisplayName { get; set; } = string.Empty;
+}
+
+public enum HandoffNotificationOutcome { Sent, Disabled, Unknown, Failed }
+
+public sealed class DraftUpgradeResult
+{
+    public EntryRecord? Draft { get; init; }
+    public string? IncompatibilityReason { get; init; }
+}
+
+public sealed class DraftTransferResult
+{
+    public required EntryRecord Draft { get; init; }
+    public HandoffNotificationOutcome NotificationOutcome { get; init; }
 }
 
 public sealed class FormPrefillRequest

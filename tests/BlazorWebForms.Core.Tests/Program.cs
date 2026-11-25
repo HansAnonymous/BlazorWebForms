@@ -1,7 +1,18 @@
+using BlazorWebForms.Core.Tests;
 using BlazorWebForms.Core.Abstractions;
 using BlazorWebForms.Core.Models;
 using BlazorWebForms.Core.Services;
 using Microsoft.Extensions.DependencyInjection;
+using DemoFormFactory = BlazorWebForms.Core.Tests.TravelTestFormFactory;
+
+await DurationRegressionTests.RunAsync();
+if (args.Contains("--duration")) return;
+
+await HandoffRegressionTests.RunAsync();
+if (args.Contains("--handoff"))
+{
+    return;
+}
 
 var services = new ServiceCollection();
 var primaryNotifier = new FakeEmailNotifier();
@@ -24,6 +35,10 @@ await repository.SeedAsync();
 
 // Run isolated unit tests for modules with least coverage
 await IsolatedUnitTests.RunAllAsync();
+
+var blankDefinition = BlazorWebForms.Core.Services.DemoFormFactory.CreateDefaultDefinition();
+Assert(blankDefinition.Sections.Count == 1 && blankDefinition.Sections[0].Fields.Count == 0,
+    "The builder default starts with one empty section.");
 
 var definition = DemoFormFactory.CreateDefaultDefinition();
 var json = serializer.Serialize(definition);
@@ -202,6 +217,17 @@ Assert(FormLayoutResolver.ResolveFieldWidthHint(visibleSections[0].Fields.First(
 Assert(FormLayoutResolver.ResolveSectionColumns(new FormSectionDefinition { Layout = new FormSectionLayoutDefinition { Columns = 12 } }) == 4, "Section layout columns use safe upper fallback.");
 Assert(FormLayoutResolver.ResolveSectionColumns(new FormSectionDefinition { Layout = new FormSectionLayoutDefinition { Columns = 0 } }) == 1, "Section layout columns use safe lower fallback.");
 Assert(FormLayoutResolver.ResolveFieldWidthHint(new FormFieldDefinition { Layout = new FormFieldLayoutDefinition { WidthHint = "INVALID" } }) == "Auto", "Field width hint uses safe fallback for unknown values.");
+
+foreach (var (columns, expected) in new[] { (1, 12), (2, 6), (3, 4), (4, 3), (0, 12), (12, 3) })
+{
+    var section = new FormSectionDefinition { Layout = new FormSectionLayoutDefinition { Columns = columns } };
+    Assert(FormLayoutResolver.ResolveFieldGridColumns(new FormFieldDefinition(), section) == expected, $"Automatic grid width for {columns} columns.");
+    foreach (var (hint, width) in new[] { ("Half", 6), ("Third", 4), ("TwoThirds", 8), ("Full", 12), ("INVALID", expected) })
+    {
+        var field = new FormFieldDefinition { Layout = new FormFieldLayoutDefinition { WidthHint = hint } };
+        Assert(FormLayoutResolver.ResolveFieldGridColumns(field, section) == width, $"Grid width for {hint} with {columns} columns.");
+    }
+}
 
 var localizedDefinition = DemoFormFactory.CreateDefaultDefinition();
 localizedDefinition.DefaultCulture = "en-US";
@@ -1399,6 +1425,72 @@ Assert(countField.NumberDisplayKind == NumberDisplayKind.Plain, "Default NumberD
 Assert(countField.MinValue is null, "Null MinValue round-trips through serializer.");
 Assert(countField.NumberUnit == string.Empty, "Empty NumberUnit round-trips through serializer.");
 
+// Instructional guides
+Assert(new FormDefinition().FormType == FormType.Standard, "Form definitions default to the standard form type.");
+Assert(serializer.Deserialize("{\"title\":\"Legacy\",\"sections\":[]}").FormType == FormType.Standard, "Legacy definitions without a form type deserialize as standard forms.");
+
+FormDefinition BuildGuideDefinition(params FormFieldDefinition[] fields) => new()
+{
+    Title = "How to file travel",
+    FormType = FormType.Guide,
+    Sections = [new FormSectionDefinition { Id = "guide-s1", Title = "Steps", Fields = fields.ToList() }]
+};
+
+var guideDefinition = BuildGuideDefinition(
+    new FormFieldDefinition { Id = "intro", Kind = FormFieldKind.Custom, CustomKind = "information", Label = "Intro" },
+    new FormFieldDefinition { Id = "who", Kind = FormFieldKind.Custom, CustomKind = "prefilled", Label = "Who" });
+Assert(serializer.Deserialize(serializer.Serialize(guideDefinition)).FormType == FormType.Guide, "Guide form type round-trips through serializer.");
+Assert(ResponsePipeHelper.ApplyPiping(guideDefinition, new Dictionary<string, string?>()).FormType == FormType.Guide, "Response piping preserves the guide form type.");
+
+var guideForm = await app.SaveDraftAsync(new SaveDraftRequest
+{
+    Name = "Travel guide",
+    Description = "Instructional guide",
+    Slug = "travel-guide",
+    AccessMode = FormAccessMode.Public,
+    Definition = guideDefinition
+});
+await app.PublishAsync(guideForm.Id);
+
+async Task<bool> GuideRejectsAsync(Func<Task> action)
+{
+    try { await action(); }
+    catch (InvalidOperationException ex) when (ex.Message.Contains("Instructional guides", StringComparison.Ordinal)) { return true; }
+    return false;
+}
+
+Assert(await GuideRejectsAsync(() => app.SubmitEntryAsync(guideForm.Id, new SubmitEntryRequest { Answers = [] })), "Guides reject submissions.");
+Assert(await GuideRejectsAsync(() => app.SaveDraftSubmissionAsync(guideForm.Id, new SaveDraftSubmissionRequest { Answers = [] })), "Guides reject draft submissions.");
+Assert(await app.GetDraftSubmissionAsync(guideForm.Id) is null, "Rejected guide drafts are not persisted.");
+
+foreach (var forbiddenKind in new[] { FormFieldKind.Signature, FormFieldKind.File })
+{
+    var invalidGuide = await app.SaveDraftAsync(new SaveDraftRequest
+    {
+        Name = $"Guide with {forbiddenKind}",
+        Description = "Invalid guide",
+        Slug = $"guide-with-{forbiddenKind.ToString().ToLowerInvariant()}",
+        AccessMode = FormAccessMode.Public,
+        Definition = BuildGuideDefinition(new FormFieldDefinition { Id = "bad", Kind = forbiddenKind, Label = "Bad" })
+    });
+    var blocked = false;
+    try { await app.PublishAsync(invalidGuide.Id); }
+    catch (InvalidOperationException ex) when (ex.Message.Contains("instructional guides", StringComparison.Ordinal)) { blocked = true; }
+    Assert(blocked, $"Guides cannot publish {forbiddenKind} fields.");
+}
+
+var prefillSources = await app.ResolvePrefillSourcesAsync(guideDefinition, new Dictionary<string, FormFieldPrefillDefinition>
+{
+    ["slot-name"] = new() { Source = PrefillSourceKind.Claim, Key = "name" },
+    ["slot-email"] = new() { Source = PrefillSourceKind.Claim, Key = "email" },
+    ["slot-none"] = new() { Source = PrefillSourceKind.None },
+    ["slot-unknown"] = new() { Source = PrefillSourceKind.Claim, Key = "not-a-claim" }
+});
+var currentUser = provider.GetRequiredService<ICurrentUserContext>().GetCurrentUser();
+Assert(prefillSources.TryGetValue("slot-name", out var slotName) && slotName == currentUser.DisplayName, "Prefill sources resolve claim names by caller key.");
+Assert(prefillSources.TryGetValue("slot-email", out var slotEmail) && slotEmail == currentUser.Email, "Prefill sources resolve claim emails by caller key.");
+Assert(!prefillSources.ContainsKey("slot-none") && !prefillSources.ContainsKey("slot-unknown"), "Unresolvable prefill sources are omitted.");
+
 Console.WriteLine("Core tests passed.");
 
 static void Assert(bool condition, string message)
@@ -1448,20 +1540,27 @@ internal sealed class FakeRepository : IFormsRepository
 {
     private readonly Dictionary<Guid, FormAggregate> forms = [];
     private readonly Dictionary<Guid, EntryRecord> entries = [];
+    private long nextToken;
+    private readonly object entryLock = new();
+    public bool DetachedEntries { get; set; }
+    private TaskCompletionSource? writeBarrier;
+    private int waitingWrites;
+    public TaskCompletionSource? WriteBarrier { get => writeBarrier; set { writeBarrier = value; waitingWrites = 0; } }
+    private EntryRecord Copy(EntryRecord entry) => DetachedEntries ? System.Text.Json.JsonSerializer.Deserialize<EntryRecord>(System.Text.Json.JsonSerializer.Serialize(entry))! : entry;
     private readonly Dictionary<Guid, FormInvitation> invitations = [];
 
     public Task SeedAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-    public Task<IReadOnlyList<FormAggregate>> GetFormsAsync(CancellationToken cancellationToken = default) =>
+    public Task<IReadOnlyList<FormAggregate>> GetFormsAsync(CancellationToken cancellationToken = default, bool includeArchived = false) =>
         Task.FromResult<IReadOnlyList<FormAggregate>>(forms.Values.ToList());
 
-    public Task<FormAggregate?> GetFormAsync(Guid formId, CancellationToken cancellationToken = default)
+    public Task<FormAggregate?> GetFormAsync(Guid formId, CancellationToken cancellationToken = default, bool includeArchived = false)
     {
         forms.TryGetValue(formId, out var form);
         return Task.FromResult(form);
     }
 
-    public Task<FormAggregate?> GetFormBySlugAsync(string slug, CancellationToken cancellationToken = default) =>
+    public Task<FormAggregate?> GetFormBySlugAsync(string slug, CancellationToken cancellationToken = default, bool includeArchived = false) =>
         Task.FromResult(forms.Values.FirstOrDefault(x => x.Publication.Slug == slug));
 
     public Task SaveFormAsync(FormAggregate form, CancellationToken cancellationToken = default)
@@ -1469,6 +1568,11 @@ internal sealed class FakeRepository : IFormsRepository
         forms[form.Id] = form;
         return Task.CompletedTask;
     }
+
+    public Task ArchiveFormAsync(Guid formId, Guid archivedByUserId, DateTimeOffset archivedUtc, CancellationToken cancellationToken = default) { forms[formId].ArchivedUtc = archivedUtc; forms[formId].ArchivedByUserId = archivedByUserId; return Task.CompletedTask; }
+    public Task RestoreFormAsync(Guid formId, CancellationToken cancellationToken = default) { forms[formId].ArchivedUtc = null; forms[formId].ArchivedByUserId = null; return Task.CompletedTask; }
+    public Task DeleteFormAsync(Guid formId, CancellationToken cancellationToken = default) { forms.Remove(formId); return Task.CompletedTask; }
+    public Task<IReadOnlyList<StoredFile>> GetStoredFilesAsync(Guid formId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<StoredFile>>([]);
 
     public Task<IReadOnlyList<EntryRecord>> GetEntriesAsync(Guid? formId, string? search, CancellationToken cancellationToken = default)
     {
@@ -1520,7 +1624,7 @@ internal sealed class FakeRepository : IFormsRepository
     public Task<EntryRecord?> GetEntryAsync(Guid entryId, CancellationToken cancellationToken = default)
     {
         entries.TryGetValue(entryId, out var entry);
-        return Task.FromResult(entry);
+        return Task.FromResult(entry is null ? null : Copy(entry));
     }
 
     public Task<EntryRecord?> GetDraftEntryAsync(Guid formId, string submittedByEmail, CancellationToken cancellationToken = default)
@@ -1529,13 +1633,34 @@ internal sealed class FakeRepository : IFormsRepository
             .Where(e => e.FormId == formId && e.Status == EntryStatus.Draft)
             .OrderByDescending(e => e.SubmittedUtc)
             .FirstOrDefault(e => string.Equals(e.SubmittedByEmail, submittedByEmail, StringComparison.OrdinalIgnoreCase));
-        return Task.FromResult(draft);
+        return Task.FromResult(draft is null ? null : Copy(draft));
     }
 
     public Task SaveEntryAsync(EntryRecord entry, CancellationToken cancellationToken = default)
     {
-        entries[entry.Id] = entry;
+        lock (entryLock)
+        {
+            entry.ConcurrencyToken = BitConverter.GetBytes(++nextToken);
+            entries[entry.Id] = Copy(entry);
+        }
         return Task.CompletedTask;
+    }
+
+    public async Task SaveDraftEntryIfUnchangedAsync(EntryRecord entry, byte[] expectedToken, CancellationToken cancellationToken = default)
+    {
+        var barrier = WriteBarrier;
+        if (barrier is not null)
+        {
+            if (Interlocked.Increment(ref waitingWrites) == 2) barrier.TrySetResult();
+            await barrier.Task.WaitAsync(cancellationToken);
+        }
+        lock (entryLock)
+        {
+            if (!entries.TryGetValue(entry.Id, out var current) || current.Status != EntryStatus.Draft || current.ConcurrencyToken is null || !current.ConcurrencyToken.SequenceEqual(expectedToken))
+                throw new InvalidOperationException("The draft was changed by another request. Reload and retry.");
+            entry.ConcurrencyToken = BitConverter.GetBytes(++nextToken);
+            entries[entry.Id] = Copy(entry);
+        }
     }
 
     public Task<IReadOnlyList<EntryFileRecord>> GetOrphanedFilesAsync(DateTimeOffset olderThanUtc, CancellationToken cancellationToken = default)
@@ -1638,6 +1763,11 @@ internal sealed class FakeFixedCurrentUserContext(UserProfile user) : ICurrentUs
 
 internal sealed class FakeEmailNotifier : IEmailNotifier
 {
+    public List<string> HandoffRecipients { get; } = [];
+    public bool FailHandoff { get; set; }
+    public Task NotifyDraftHandedOffAsync(FormAggregate form, EntryRecord draft, string recipientEmail, CancellationToken cancellationToken = default) { HandoffRecipients.Add(recipientEmail); if (FailHandoff) throw new InvalidOperationException("Notification failure"); return Task.CompletedTask; }
+    public async Task<HandoffNotificationOutcome> NotifyDraftHandedOffWithResultAsync(FormAggregate form, EntryRecord draft, string recipientEmail, CancellationToken cancellationToken = default) { await NotifyDraftHandedOffAsync(form, draft, recipientEmail, cancellationToken); return HandoffNotificationOutcome.Sent; }
+
     public List<Guid> CreatedInvitationIds { get; } = [];
     public List<Guid> AcceptedInvitationIds { get; } = [];
     public List<Guid> RevokedInvitationIds { get; } = [];

@@ -119,6 +119,8 @@ public sealed class EntryRecord
     public Guid Id { get; set; } = Guid.NewGuid();
     public Guid FormId { get; set; }
     public Guid FormVersionId { get; set; }
+    /// <summary>Repository concurrency token; callers must not supply or modify it.</summary>
+    public byte[]? ConcurrencyToken { get; set; }
     public string SubmittedBy { get; set; } = string.Empty;
     public string SubmittedByEmail { get; set; } = string.Empty;
     public DateTimeOffset SubmittedUtc { get; set; } = DateTimeOffset.UtcNow;

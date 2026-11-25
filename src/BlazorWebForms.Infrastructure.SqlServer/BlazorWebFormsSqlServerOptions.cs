@@ -15,6 +15,8 @@ public sealed class BlazorWebFormsSqlServerOptions
     public int PdfMaxAnswerRows { get; set; } = 500;
     public int PdfMaxAuditRows { get; set; } = 250;
     public int PdfMaxBytes { get; set; } = 1_000_000;
+    /// <summary>Absolute form URL template with {slug} and {draftId} placeholders for handoff emails.</summary>
+    public string HandoffFormUrlTemplate { get; set; } = string.Empty;
     public bool EnableOutboundEmail { get; set; }
     public int EmailRetryCount { get; set; } = 3;
     public int EmailRetryDelayMs { get; set; } = 200;

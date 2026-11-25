@@ -79,7 +79,7 @@ public sealed class BlazorWebFormsDbContext : DbContext
             b.Property(x => x.Answers).HasConversion(dictNullableConverter).HasColumnType("nvarchar(max)");
             b.Property(x => x.SearchIndex).HasConversion(dictStringConverter).HasColumnType("nvarchar(max)");
             b.Property(x => x.Score).HasColumnType("decimal(18,2)");
-            b.Ignore(x => x.RowVersion);
+            b.Property(x => x.RowVersion).IsRowVersion();
             b.HasIndex(x => x.FormId);
             b.HasIndex(x => new { x.FormId, x.SubmittedUtc });
             b.HasIndex(x => new { x.FormId, x.Status, x.SubmittedUtc });

@@ -8,6 +8,8 @@ public sealed class FormDefinition
     public string Title { get; set; } = string.Empty;
     public string Description { get; set; } = string.Empty;
     public string DefaultCulture { get; set; } = "en-US";
+    /// <summary>Purpose of the form. <see cref="FormType.Guide"/> definitions are read-only instructional content and reject drafts and submissions.</summary>
+    public FormType FormType { get; set; } = FormType.Standard;
     public BrandingDefinition Branding { get; set; } = new();
     public List<FormSectionDefinition> Sections { get; set; } = [];
     public Dictionary<string, string> LocalizedTitles { get; set; } = new(StringComparer.OrdinalIgnoreCase);

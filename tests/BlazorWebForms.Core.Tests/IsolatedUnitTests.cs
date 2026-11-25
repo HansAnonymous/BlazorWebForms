@@ -3,6 +3,7 @@ using BlazorWebForms.Core.Abstractions;
 using BlazorWebForms.Core.Models;
 using BlazorWebForms.Core.Services;
 using Microsoft.Extensions.DependencyInjection;
+using DemoFormFactory = BlazorWebForms.Core.Tests.TravelTestFormFactory;
 
 internal static class IsolatedUnitTests
 {
@@ -1328,20 +1329,27 @@ internal sealed class TestFakeRepository : IFormsRepository
 {
     private readonly Dictionary<Guid, FormAggregate> forms = [];
     private readonly Dictionary<Guid, EntryRecord> entries = [];
+    private long nextToken;
+    private readonly object entryLock = new();
+    public bool DetachedEntries { get; set; }
+    private TaskCompletionSource? writeBarrier;
+    private int waitingWrites;
+    public TaskCompletionSource? WriteBarrier { get => writeBarrier; set { writeBarrier = value; waitingWrites = 0; } }
+    private EntryRecord Copy(EntryRecord entry) => DetachedEntries ? System.Text.Json.JsonSerializer.Deserialize<EntryRecord>(System.Text.Json.JsonSerializer.Serialize(entry))! : entry;
     private readonly Dictionary<Guid, FormInvitation> invitations = [];
 
     public Task SeedAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
 
-    public Task<IReadOnlyList<FormAggregate>> GetFormsAsync(CancellationToken cancellationToken = default) =>
+    public Task<IReadOnlyList<FormAggregate>> GetFormsAsync(CancellationToken cancellationToken = default, bool includeArchived = false) =>
         Task.FromResult<IReadOnlyList<FormAggregate>>(forms.Values.ToList());
 
-    public Task<FormAggregate?> GetFormAsync(Guid formId, CancellationToken cancellationToken = default)
+    public Task<FormAggregate?> GetFormAsync(Guid formId, CancellationToken cancellationToken = default, bool includeArchived = false)
     {
         forms.TryGetValue(formId, out var form);
         return Task.FromResult(form);
     }
 
-    public Task<FormAggregate?> GetFormBySlugAsync(string slug, CancellationToken cancellationToken = default) =>
+    public Task<FormAggregate?> GetFormBySlugAsync(string slug, CancellationToken cancellationToken = default, bool includeArchived = false) =>
         Task.FromResult(forms.Values.FirstOrDefault(x => string.Equals(x.Publication.Slug, slug, StringComparison.OrdinalIgnoreCase)));
 
     public Task SaveFormAsync(FormAggregate form, CancellationToken cancellationToken = default)
@@ -1349,6 +1357,11 @@ internal sealed class TestFakeRepository : IFormsRepository
         forms[form.Id] = form;
         return Task.CompletedTask;
     }
+
+    public Task ArchiveFormAsync(Guid formId, Guid archivedByUserId, DateTimeOffset archivedUtc, CancellationToken cancellationToken = default) { forms[formId].ArchivedUtc = archivedUtc; forms[formId].ArchivedByUserId = archivedByUserId; return Task.CompletedTask; }
+    public Task RestoreFormAsync(Guid formId, CancellationToken cancellationToken = default) { forms[formId].ArchivedUtc = null; forms[formId].ArchivedByUserId = null; return Task.CompletedTask; }
+    public Task DeleteFormAsync(Guid formId, CancellationToken cancellationToken = default) { forms.Remove(formId); return Task.CompletedTask; }
+    public Task<IReadOnlyList<StoredFile>> GetStoredFilesAsync(Guid formId, CancellationToken cancellationToken = default) => Task.FromResult<IReadOnlyList<StoredFile>>([]);
 
     public Task<IReadOnlyList<EntryRecord>> GetEntriesAsync(Guid? formId, string? search, CancellationToken cancellationToken = default)
     {
@@ -1375,7 +1388,7 @@ internal sealed class TestFakeRepository : IFormsRepository
     public Task<EntryRecord?> GetEntryAsync(Guid entryId, CancellationToken cancellationToken = default)
     {
         entries.TryGetValue(entryId, out var entry);
-        return Task.FromResult(entry);
+        return Task.FromResult(entry is null ? null : Copy(entry));
     }
 
     public Task<EntryRecord?> GetDraftEntryAsync(Guid formId, string submittedByEmail, CancellationToken cancellationToken = default)
@@ -1384,13 +1397,34 @@ internal sealed class TestFakeRepository : IFormsRepository
             .Where(e => e.FormId == formId && e.Status == EntryStatus.Draft)
             .OrderByDescending(e => e.SubmittedUtc)
             .FirstOrDefault(e => string.Equals(e.SubmittedByEmail, submittedByEmail, StringComparison.OrdinalIgnoreCase));
-        return Task.FromResult(draft);
+        return Task.FromResult(draft is null ? null : Copy(draft));
     }
 
     public Task SaveEntryAsync(EntryRecord entry, CancellationToken cancellationToken = default)
     {
-        entries[entry.Id] = entry;
+        lock (entryLock)
+        {
+            entry.ConcurrencyToken = BitConverter.GetBytes(++nextToken);
+            entries[entry.Id] = Copy(entry);
+        }
         return Task.CompletedTask;
+    }
+
+    public async Task SaveDraftEntryIfUnchangedAsync(EntryRecord entry, byte[] expectedToken, CancellationToken cancellationToken = default)
+    {
+        var barrier = WriteBarrier;
+        if (barrier is not null)
+        {
+            if (Interlocked.Increment(ref waitingWrites) == 2) barrier.TrySetResult();
+            await barrier.Task.WaitAsync(cancellationToken);
+        }
+        lock (entryLock)
+        {
+            if (!entries.TryGetValue(entry.Id, out var current) || current.Status != EntryStatus.Draft || current.ConcurrencyToken is null || !current.ConcurrencyToken.SequenceEqual(expectedToken))
+                throw new InvalidOperationException("The draft was changed by another request. Reload and retry.");
+            entry.ConcurrencyToken = BitConverter.GetBytes(++nextToken);
+            entries[entry.Id] = Copy(entry);
+        }
     }
 
     public Task<IReadOnlyList<EntryFileRecord>> GetOrphanedFilesAsync(DateTimeOffset olderThanUtc, CancellationToken cancellationToken = default)
@@ -1440,6 +1474,9 @@ internal sealed class TestFakeRepository : IFormsRepository
 
 internal sealed class TestFakeEmailNotifier : IEmailNotifier
 {
+    public List<string> HandoffRecipients { get; } = [];
+    public Task NotifyDraftHandedOffAsync(FormAggregate form, EntryRecord draft, string recipientEmail, CancellationToken cancellationToken = default) { HandoffRecipients.Add(recipientEmail); return Task.CompletedTask; }
+
     public Task NotifyManagersAsync(FormAggregate form, EntryRecord entry, CancellationToken cancellationToken = default) =>
         Task.CompletedTask;
     public Task<string?> NotifyApproverAssignedAsync(FormAggregate form, EntryRecord entry, ApprovalStepRecord step, string idempotencyKey, CancellationToken cancellationToken = default) =>

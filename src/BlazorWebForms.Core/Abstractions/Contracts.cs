@@ -36,6 +36,12 @@ public interface IEmailNotifier
     Task NotifyInvitationCreatedAsync(FormAggregate form, FormInvitation invitation, CancellationToken cancellationToken = default);
     Task NotifyInvitationAcceptedAsync(FormAggregate form, FormInvitation invitation, CancellationToken cancellationToken = default);
     Task NotifyInvitationRevokedAsync(FormAggregate form, FormInvitation invitation, CancellationToken cancellationToken = default);
+    Task NotifyDraftHandedOffAsync(FormAggregate form, EntryRecord draft, string recipientEmail, CancellationToken cancellationToken = default);
+    async Task<HandoffNotificationOutcome> NotifyDraftHandedOffWithResultAsync(FormAggregate form, EntryRecord draft, string recipientEmail, CancellationToken cancellationToken = default)
+    {
+        await NotifyDraftHandedOffAsync(form, draft, recipientEmail, cancellationToken);
+        return HandoffNotificationOutcome.Unknown;
+    }
 }
 
 public interface ICurrentUserContext
@@ -116,6 +122,9 @@ public interface IFormsRepository
     Task<EntryRecord?> GetEntryAsync(Guid entryId, CancellationToken cancellationToken = default);
     Task<EntryRecord?> GetDraftEntryAsync(Guid formId, string submittedByEmail, CancellationToken cancellationToken = default);
     Task SaveEntryAsync(EntryRecord entry, CancellationToken cancellationToken = default);
+    /// <summary>Atomically saves an existing draft only if its repository-issued token still matches; updates the token on success.</summary>
+    Task SaveDraftEntryIfUnchangedAsync(EntryRecord entry, byte[] expectedToken, CancellationToken cancellationToken = default) =>
+        throw new NotSupportedException("This repository does not support atomic draft concurrency checks.");
     Task<IReadOnlyList<EntryFileRecord>> GetOrphanedFilesAsync(DateTimeOffset olderThanUtc, CancellationToken cancellationToken = default);
     Task<int> DeleteDraftEntriesOlderThanAsync(DateTimeOffset olderThanUtc, CancellationToken cancellationToken = default);
 

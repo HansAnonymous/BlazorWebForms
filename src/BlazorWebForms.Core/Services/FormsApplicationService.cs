@@ -24,6 +24,7 @@ public sealed class FormsApplicationService(
     IOperationalTelemetry telemetry,
     IWebhookDispatcher webhookDispatcher,
     IFormulaEvaluator formulaEvaluator,
+    IConditionEvaluator conditionEvaluator,
     ICaptchaValidator captchaValidator,
     IFormAnalyticsStore analyticsStore,
     ILogger<FormsApplicationService> logger)
@@ -493,6 +494,52 @@ public sealed class FormsApplicationService(
         return await ResolvePrefillAnswersCoreAsync(definition, existingAnswers, employeeEmail, includeClaimProviders: true, cancellationToken);
     }
 
+    /// <summary>
+    /// Resolves arbitrary prefill sources that are not bound to a single field (for example, several
+    /// tokens embedded in one templated question). Results are keyed by the caller-supplied keys;
+    /// sources that cannot be resolved are omitted.
+    /// </summary>
+    public async Task<Dictionary<string, string?>> ResolvePrefillSourcesAsync(
+        FormDefinition definition,
+        IReadOnlyDictionary<string, FormFieldPrefillDefinition> sources,
+        IReadOnlyDictionary<string, string?>? existingAnswers = null,
+        string? employeeEmail = null,
+        CancellationToken cancellationToken = default)
+    {
+        var results = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        if (sources.Count == 0)
+        {
+            return results;
+        }
+
+        var user = currentUserContext.GetCurrentUser();
+        var answers = existingAnswers ?? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, prefill) in sources)
+        {
+            if (string.IsNullOrWhiteSpace(key) || prefill is null || prefill.Source == PrefillSourceKind.None)
+            {
+                continue;
+            }
+
+            var syntheticField = new FormFieldDefinition { Id = key, Kind = FormFieldKind.Text, Prefill = prefill };
+            var value = await ResolvePrefillValueAsync(definition, syntheticField, user, answers, employeeEmail, includeClaimProviders: true, cancellationToken);
+            if (!string.IsNullOrWhiteSpace(value))
+            {
+                results[key] = value;
+            }
+        }
+
+        return results;
+    }
+
+    private static void EnsureAcceptsResponses(FormDefinition definition)
+    {
+        if (definition.FormType == FormType.Guide)
+        {
+            throw new InvalidOperationException("Instructional guides do not accept drafts or submissions.");
+        }
+    }
+
     public async Task<EntryRecord> CreateManagerPrefilledDraftAsync(Guid formId, ManagerPrefillDraftRequest request, CancellationToken cancellationToken = default)
     {
         var form = await repository.GetFormAsync(formId, cancellationToken)
@@ -512,12 +559,22 @@ public sealed class FormsApplicationService(
         var version = form.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault()
                       ?? throw new InvalidOperationException("Form has not been published.");
         var definition = serializer.Deserialize(version.DefinitionJson);
+        EnsureAcceptsResponses(definition);
         var answers = await ResolvePrefillAnswersCoreAsync(
             definition,
             request.Answers,
             request.SubmitterEmail.Trim(),
             includeClaimProviders: false,
             cancellationToken);
+
+        StripReservedMetadata(answers);
+        if (IsTemplatedFormEnabled(definition))
+        {
+            var steps = GetHandoffSteps(definition);
+            answers[TemplatedInitiatorEmailKey] = request.SubmitterEmail.Trim();
+            answers[TemplatedInitiatorNameKey] = string.IsNullOrWhiteSpace(request.SubmitterName) ? request.SubmitterEmail.Trim() : request.SubmitterName.Trim();
+            if (steps.Count > 0) answers[HandoffStepIdKey] = steps[0];
+        }
 
         var entry = new EntryRecord
         {
@@ -530,6 +587,7 @@ public sealed class FormsApplicationService(
             Answers = answers
         };
         var revisionNumber = entry.Revisions.Count + 1;
+        RejectReservedFileFields(request.Files);
         entry.Files = EntryFileMapper.MapFiles(request.Files, manager.UserId, manager.Email, revisionNumber);
         EntryFileMapper.ApplyFileAnswers(entry.Answers, request.Files);
         entry.SearchIndex = SearchIndexBuilder.Build(definition, entry.Answers);
@@ -632,6 +690,7 @@ public sealed class FormsApplicationService(
                       ?? throw new InvalidOperationException("Form has not been published.");
 
         var definition = serializer.Deserialize(version.DefinitionJson);
+        EnsureAcceptsResponses(definition);
         var templatedEnabled = IsTemplatedFormEnabled(definition);
 
         EntryRecord? draft = null;
@@ -645,24 +704,45 @@ public sealed class FormsApplicationService(
             }
         }
 
-        var normalizedAnswers = new Dictionary<string, string?>(request.Answers, StringComparer.OrdinalIgnoreCase);
+        var steps = templatedEnabled ? GetHandoffSteps(definition) : [];
+        if (draft is not null && (templatedEnabled || HasWorkflowMetadata(draft.Answers)))
+        {
+            EnsureDraftVersion(draft, version);
+            if (!templatedEnabled) throw new InvalidOperationException("The draft's handoff workflow is no longer available.");
+        }
+        RejectReservedFileFields(request.Files);
+        var expectedToken = draft?.ConcurrencyToken?.ToArray();
+        var normalizedAnswers = templatedEnabled ? MergeAnswers(draft?.Answers, request.Answers) : new Dictionary<string, string?>(request.Answers, StringComparer.OrdinalIgnoreCase);
         if (templatedEnabled)
         {
-            PreserveTemplatedMetadata(draft?.Answers, normalizedAnswers);
+            EnsureWorkflowIdentity(user);
+            RestoreReservedMetadata(draft?.Answers, normalizedAnswers);
             EnsureTemplatedInitiatorMetadata(normalizedAnswers, user);
-            EnforceTemplatedFieldPermissions(definition, user, normalizedAnswers, draft?.Answers);
-
-            var recipientEmail = ResolveTemplatedMetadataValue(normalizedAnswers, draft?.Answers, TemplatedRecipientEmailKey);
-            if (string.IsNullOrWhiteSpace(recipientEmail))
+            EntryFileMapper.ApplyFileAnswers(normalizedAnswers, request.Files);
+            ApplyFormulaFields(definition, normalizedAnswers);
+            var actorRole = steps.Count > 0 ? ResolveHandoffStep(steps, draft?.Answers) : ResolveTemplatedActorRole(user, normalizedAnswers, draft?.Answers);
+            if (steps.Count > 0)
             {
-                throw new InvalidOperationException("Templated forms must be handed off to a recipient before submission.");
+                if (draft is null || !string.Equals(actorRole, steps[^1], StringComparison.Ordinal))
+                    throw new InvalidOperationException("Only the final handoff step can submit this form.");
+                normalizedAnswers[HandoffStepIdKey] = actorRole;
+                EnsureRequiredHandoffFields(definition, steps, actorRole, normalizedAnswers);
             }
-
-            if (!string.Equals(recipientEmail, user.Email, StringComparison.OrdinalIgnoreCase))
+            else
             {
-                throw new InvalidOperationException("Only the handoff recipient can submit this templated form.");
+                var recipientEmail = ResolveTemplatedMetadataValue(normalizedAnswers, draft?.Answers, TemplatedRecipientEmailKey);
+                if (draft is null || string.IsNullOrWhiteSpace(recipientEmail) || !string.Equals(recipientEmail, user.Email, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Only the handoff recipient can submit this templated form.");
             }
+            EnforceTemplatedFieldPermissions(definition, actorRole, steps, normalizedAnswers, draft?.Answers, request.Files);
+            EnforceFileRemovalPermissions(definition, actorRole, steps, request.Answers, draft?.Files);
         }
+        else
+        {
+            StripReservedMetadata(normalizedAnswers);
+        }
+
+        ValidateDurationAnswers(definition, normalizedAnswers);
 
         var entry = draft ?? new EntryRecord
         {
@@ -688,7 +768,7 @@ public sealed class FormsApplicationService(
         var revisionNumber = entry.Revisions.Count + 1;
 
         entry.SearchIndex = SearchIndexBuilder.Build(definition, entry.Answers);
-        entry.Files = EntryFileMapper.MapFiles(request.Files, user.UserId, user.Email, revisionNumber);
+        entry.Files = templatedEnabled ? MergeFiles(draft?.Files, request.Files, request.Answers, user, revisionNumber) : EntryFileMapper.MapFiles(request.Files, user.UserId, user.Email, revisionNumber);
         EntryFileMapper.ApplyFileAnswers(entry.Answers, request.Files);
 
         entry.Revisions.Add(new EntryRevisionRecord
@@ -709,7 +789,8 @@ public sealed class FormsApplicationService(
             entry.QuizPassed = definition.PassScore.HasValue ? entry.Score >= definition.PassScore.Value : null;
         }
 
-        await repository.SaveEntryAsync(entry, cancellationToken);
+        if (templatedEnabled && draft is not null) await SaveWorkflowDraftAsync(entry, expectedToken, cancellationToken);
+        else await repository.SaveEntryAsync(entry, cancellationToken);
         metadataCache.InvalidateForms();
         await emailNotifier.NotifyManagersAsync(form, entry, cancellationToken);
         await NotifyPendingApproverAssignmentsAsync(form, entry, cancellationToken);
@@ -741,6 +822,9 @@ public sealed class FormsApplicationService(
             throw new InvalidOperationException("Current user cannot save draft submissions for this form.");
         }
 
+        if (request.StartNew && request.DraftEntryId.HasValue)
+            throw new InvalidOperationException("A new draft cannot specify an existing draft ID.");
+
         EntryRecord? entry;
         if (request.DraftEntryId.HasValue)
         {
@@ -754,12 +838,18 @@ public sealed class FormsApplicationService(
         }
         else
         {
-            entry = await repository.GetDraftEntryAsync(formId, user.Email, cancellationToken);
+            entry = request.StartNew ? null : await repository.GetDraftEntryAsync(formId, user.Email, cancellationToken);
         }
 
         var version = form.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault()
                       ?? throw new InvalidOperationException("Form has not been published.");
+        if (request.ExpectedFormVersionId.HasValue && request.ExpectedFormVersionId != version.Id)
+            throw new InvalidOperationException("The form was published again. Reload and try again.");
 
+        var definition = serializer.Deserialize(version.DefinitionJson);
+        EnsureAcceptsResponses(definition);
+
+        var isNewEntry = entry is null;
         entry ??= new EntryRecord
         {
             FormId = form.Id,
@@ -771,15 +861,32 @@ public sealed class FormsApplicationService(
             Status = EntryStatus.Draft
         };
 
-        var definition = serializer.Deserialize(version.DefinitionJson);
         var templatedEnabled = IsTemplatedFormEnabled(definition);
 
-        var normalizedAnswers = new Dictionary<string, string?>(request.Answers, StringComparer.OrdinalIgnoreCase);
+        var steps = templatedEnabled ? GetHandoffSteps(definition) : [];
+        if (!isNewEntry && (templatedEnabled || HasWorkflowMetadata(entry.Answers)))
+        {
+            EnsureDraftVersion(entry, version);
+            if (!templatedEnabled) throw new InvalidOperationException("The draft's handoff workflow is no longer available.");
+        }
+        RejectReservedFileFields(request.Files);
+        var expectedToken = isNewEntry ? null : entry.ConcurrencyToken?.ToArray();
+        var normalizedAnswers = templatedEnabled ? MergeAnswers(entry.Answers, request.Answers) : new Dictionary<string, string?>(request.Answers, StringComparer.OrdinalIgnoreCase);
         if (templatedEnabled)
         {
-            PreserveTemplatedMetadata(entry.Answers, normalizedAnswers);
+            EnsureWorkflowIdentity(user);
+            RestoreReservedMetadata(isNewEntry ? null : entry.Answers, normalizedAnswers);
             EnsureTemplatedInitiatorMetadata(normalizedAnswers, user);
-            EnforceTemplatedFieldPermissions(definition, user, normalizedAnswers, entry.Answers);
+            EntryFileMapper.ApplyFileAnswers(normalizedAnswers, request.Files);
+            ApplyFormulaFields(definition, normalizedAnswers);
+            var actorRole = steps.Count > 0 ? ResolveHandoffStep(steps, isNewEntry ? null : entry.Answers) : ResolveTemplatedActorRole(user, normalizedAnswers, entry.Answers);
+            if (steps.Count > 0) normalizedAnswers[HandoffStepIdKey] = actorRole;
+            EnforceTemplatedFieldPermissions(definition, actorRole, steps, normalizedAnswers, isNewEntry ? null : entry.Answers, request.Files);
+            EnforceFileRemovalPermissions(definition, actorRole, steps, request.Answers, isNewEntry ? null : entry.Files);
+        }
+        else
+        {
+            StripReservedMetadata(normalizedAnswers);
         }
 
         entry.FormVersionId = version.Id;
@@ -791,9 +898,10 @@ public sealed class FormsApplicationService(
         entry.SearchIndex = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         var revisionNumber = entry.Revisions.Count + 1;
 
-        entry.Files = EntryFileMapper.MapFiles(request.Files, user.UserId, user.Email, revisionNumber);
+        entry.Files = templatedEnabled ? MergeFiles(entry.Files, request.Files, request.Answers, user, revisionNumber) : EntryFileMapper.MapFiles(request.Files, user.UserId, user.Email, revisionNumber);
         EntryFileMapper.ApplyFileAnswers(entry.Answers, request.Files);
 
+        if (templatedEnabled) ApplyFormulaFields(definition, entry.Answers);
         entry.SearchIndex = SearchIndexBuilder.Build(definition, entry.Answers);
 
         entry.ApprovalSteps = request.Approvers
@@ -815,7 +923,8 @@ public sealed class FormsApplicationService(
             Answers = new Dictionary<string, string?>(entry.Answers, StringComparer.OrdinalIgnoreCase)
         });
 
-        await repository.SaveEntryAsync(entry, cancellationToken);
+        if (templatedEnabled && !isNewEntry) await SaveWorkflowDraftAsync(entry, expectedToken, cancellationToken);
+        else await repository.SaveEntryAsync(entry, cancellationToken);
         metadataCache.InvalidateForms();
         if (entry.ApprovalSteps.Count > 0)
         {
@@ -824,7 +933,10 @@ public sealed class FormsApplicationService(
         return entry;
     }
 
-    public async Task<EntryRecord> TransferDraftSubmissionAsync(Guid formId, TransferDraftSubmissionRequest request, CancellationToken cancellationToken = default)
+    public async Task<EntryRecord> TransferDraftSubmissionAsync(Guid formId, TransferDraftSubmissionRequest request, CancellationToken cancellationToken = default) =>
+        (await TransferDraftSubmissionWithResultAsync(formId, request, cancellationToken)).Draft;
+
+    public async Task<DraftTransferResult> TransferDraftSubmissionWithResultAsync(Guid formId, TransferDraftSubmissionRequest request, CancellationToken cancellationToken = default)
     {
         var form = await repository.GetFormAsync(formId, cancellationToken)
                    ?? throw new InvalidOperationException("Form not found.");
@@ -838,6 +950,7 @@ public sealed class FormsApplicationService(
         var version = form.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault()
                       ?? throw new InvalidOperationException("Form has not been published.");
         var definition = serializer.Deserialize(version.DefinitionJson);
+        EnsureAcceptsResponses(definition);
         if (!IsTemplatedFormEnabled(definition))
         {
             throw new InvalidOperationException("Draft handoff is only available when templated mode is enabled.");
@@ -852,6 +965,17 @@ public sealed class FormsApplicationService(
             throw new InvalidOperationException("Draft submission is not accessible to current user.");
         }
 
+        var expectedToken = draft.ConcurrencyToken?.ToArray();
+        EnsureWorkflowIdentity(user);
+        EnsureDraftVersion(draft, version);
+        var steps = GetHandoffSteps(definition);
+        var currentStep = steps.Count > 0 ? ResolveHandoffStep(steps, draft.Answers) : null;
+        var stepIndex = currentStep is null ? -1 : steps.IndexOf(currentStep);
+        if (steps.Count > 0 && stepIndex == steps.Count - 1)
+            throw new InvalidOperationException("The final handoff step cannot transfer this draft.");
+        if (steps.Count > 0) EnsureRequiredHandoffFields(definition, steps, currentStep!, draft.Answers);
+        ValidateDurationAnswers(definition, draft.Answers, currentStep ?? "Initiator", steps);
+
         var recipientEmail = (request.RecipientEmail ?? string.Empty).Trim();
         if (string.IsNullOrWhiteSpace(recipientEmail) || !recipientEmail.Contains('@'))
         {
@@ -865,8 +989,8 @@ public sealed class FormsApplicationService(
         }
 
         draft.Answers ??= new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        draft.Answers[TemplatedInitiatorEmailKey] = user.Email;
-        draft.Answers[TemplatedInitiatorNameKey] = user.DisplayName;
+        EnsureTemplatedInitiatorMetadata(draft.Answers, user);
+        if (steps.Count > 0) draft.Answers[HandoffStepIdKey] = steps[stepIndex + 1];
         draft.Answers[TemplatedRecipientEmailKey] = recipientEmail;
         draft.Answers["__templated.recipientName"] = string.IsNullOrWhiteSpace(request.RecipientDisplayName)
             ? recipientEmail
@@ -887,9 +1011,19 @@ public sealed class FormsApplicationService(
             Answers = new Dictionary<string, string?>(draft.Answers, StringComparer.OrdinalIgnoreCase)
         });
 
-        await repository.SaveEntryAsync(draft, cancellationToken);
+        await SaveWorkflowDraftAsync(draft, expectedToken, cancellationToken);
         metadataCache.InvalidateForms();
-        return draft;
+        HandoffNotificationOutcome outcome;
+        try
+        {
+            outcome = await emailNotifier.NotifyDraftHandedOffWithResultAsync(form, draft, recipientEmail, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Draft {DraftId} was transferred but the handoff notification could not be delivered.", draft.Id);
+            outcome = HandoffNotificationOutcome.Failed;
+        }
+        return new DraftTransferResult { Draft = draft, NotificationOutcome = outcome };
     }
 
     public async Task<EntryRecord?> GetDraftSubmissionAsync(Guid formId, CancellationToken cancellationToken = default)
@@ -903,6 +1037,64 @@ public sealed class FormsApplicationService(
         }
 
         return await repository.GetDraftEntryAsync(formId, user.Email, cancellationToken);
+    }
+
+    public async Task<EntryRecord?> GetDraftSubmissionAsync(Guid formId, Guid draftEntryId, CancellationToken cancellationToken = default)
+    {
+        var form = await repository.GetFormAsync(formId, cancellationToken)
+                   ?? throw new InvalidOperationException("Form not found.");
+        var user = currentUserContext.GetCurrentUser();
+        if (!permissionEvaluator.CanSubmitForm(form, user) || !user.IsAuthenticated || string.IsNullOrWhiteSpace(user.Email))
+            throw new InvalidOperationException("Current user cannot access draft submissions for this form.");
+        var draft = await repository.GetEntryAsync(draftEntryId, cancellationToken);
+        if (draft is null || draft.FormId != formId || draft.Status != EntryStatus.Draft ||
+            !string.Equals(draft.SubmittedByEmail, user.Email, StringComparison.OrdinalIgnoreCase))
+            return null;
+        return draft;
+    }
+
+    public async Task<DraftUpgradeResult> UpgradeHandoffDraftAsync(Guid formId, Guid draftId, Guid expectedVersionId, CancellationToken cancellationToken = default)
+    {
+        var form = await repository.GetFormAsync(formId, cancellationToken)
+                   ?? throw new InvalidOperationException("Form not found.");
+        var user = currentUserContext.GetCurrentUser();
+        if (!permissionEvaluator.CanSubmitForm(form, user))
+            throw new InvalidOperationException("Current user cannot access draft submissions for this form.");
+        EnsureWorkflowIdentity(user);
+        var draft = await repository.GetEntryAsync(draftId, cancellationToken);
+        if (draft is null || draft.FormId != formId || draft.Status != EntryStatus.Draft ||
+            !string.Equals(draft.SubmittedByEmail, user.Email, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("Draft submission is not accessible to current user.");
+
+        var version = form.Versions.OrderByDescending(v => v.VersionNumber).FirstOrDefault()
+                      ?? throw new InvalidOperationException("Form has not been published.");
+        if (version.Id != expectedVersionId)
+            throw new InvalidOperationException("The form was published again. Reload and try again.");
+        if (draft.FormVersionId == version.Id) return new DraftUpgradeResult { Draft = draft };
+        var previousVersion = form.Versions.FirstOrDefault(v => v.Id == draft.FormVersionId);
+        if (previousVersion is null)
+            return new DraftUpgradeResult { IncompatibilityReason = "The previous form version is unavailable." };
+
+        var previous = serializer.Deserialize(previousVersion.DefinitionJson);
+        var current = serializer.Deserialize(version.DefinitionJson);
+        var reason = GetHandoffUpgradeIncompatibility(previous, current, draft, user);
+        if (reason is not null) return new DraftUpgradeResult { IncompatibilityReason = reason };
+
+        var token = draft.ConcurrencyToken?.ToArray();
+        draft.FormVersionId = version.Id;
+        draft.SubmittedUtc = DateTimeOffset.UtcNow;
+        ApplyFormulaFields(current, draft.Answers);
+        draft.SearchIndex = SearchIndexBuilder.Build(current, draft.Answers);
+        draft.Revisions.Add(new EntryRevisionRecord
+        {
+            RevisionNumber = draft.Revisions.Count + 1,
+            EditedBy = user.DisplayName,
+            EditedUtc = draft.SubmittedUtc,
+            Answers = new Dictionary<string, string?>(draft.Answers, StringComparer.OrdinalIgnoreCase)
+        });
+        await SaveWorkflowDraftAsync(draft, token, cancellationToken);
+        metadataCache.InvalidateForms();
+        return new DraftUpgradeResult { Draft = draft };
     }
 
     public async Task<EntryRecord?> GetLatestUserEntryAsync(Guid formId, CancellationToken cancellationToken = default)
@@ -939,7 +1131,18 @@ public sealed class FormsApplicationService(
                       ?? throw new InvalidOperationException("Form version not found for entry.");
 
         var definition = serializer.Deserialize(version.DefinitionJson);
+        if (entry.Status == EntryStatus.Draft)
+            throw new InvalidOperationException("Drafts must be edited through the draft workflow.");
+        if (IsTemplatedFormEnabled(definition) || HasWorkflowMetadata(entry.Answers))
+        {
+            EnsureWorkflowIdentity(user);
+            if (!permissionEvaluator.CanSubmitForm(form, user) || !string.Equals(entry.SubmittedByEmail, user.Email, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Current user cannot revise this workflow submission.");
+            answers = PrepareWorkflowRevision(definition, entry, user, answers);
+        }
+        else StripReservedMetadata(answers);
 
+        ValidateDurationAnswers(definition, answers);
         entry.Answers = new Dictionary<string, string?>(answers, StringComparer.OrdinalIgnoreCase);
         entry.SearchIndex = SearchIndexBuilder.Build(definition, entry.Answers);
 
@@ -1072,7 +1275,16 @@ public sealed class FormsApplicationService(
         var version = form.Versions.FirstOrDefault(v => v.Id == entry.FormVersionId)
                       ?? throw new InvalidOperationException("Form version not found for entry.");
         var definition = serializer.Deserialize(version.DefinitionJson);
+        if (IsTemplatedFormEnabled(definition) || HasWorkflowMetadata(entry.Answers))
+        {
+            EnsureWorkflowIdentity(user);
+            if (!permissionEvaluator.CanSubmitForm(form, user) || !string.Equals(entry.SubmittedByEmail, user.Email, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Current user cannot resubmit this workflow submission.");
+            request.Answers = PrepareWorkflowRevision(definition, entry, user, request.Answers);
+        }
+        else StripReservedMetadata(request.Answers);
 
+        ValidateDurationAnswers(definition, request.Answers);
         entry.Answers = new Dictionary<string, string?>(request.Answers, StringComparer.OrdinalIgnoreCase);
         entry.SearchIndex = SearchIndexBuilder.Build(definition, entry.Answers);
 
@@ -1742,6 +1954,11 @@ public sealed class FormsApplicationService(
                     throw new InvalidOperationException($"Duplicate field id '{field.Id}' found.");
                 }
 
+                if (definition.FormType == FormType.Guide && field.Kind is FormFieldKind.Signature or FormFieldKind.File)
+                {
+                    throw new InvalidOperationException($"Field '{field.Label}' cannot be a {field.Kind} field because instructional guides do not collect responses.");
+                }
+
                 if (!string.IsNullOrWhiteSpace(field.RegexPattern))
                 {
                     try
@@ -2284,88 +2501,199 @@ public sealed class FormsApplicationService(
 
     private static bool IsTemplatedFormEnabled(FormDefinition definition)
     {
-        if (!definition.Metadata.TryGetValue(FormSettingsMetadataKey, out var settingsJson) || string.IsNullOrWhiteSpace(settingsJson))
-        {
-            return false;
-        }
-
+        if (!definition.Metadata.TryGetValue(FormSettingsMetadataKey, out var settingsJson) || string.IsNullOrWhiteSpace(settingsJson)) return false;
         try
         {
             using var doc = JsonDocument.Parse(settingsJson);
             var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object)
-            {
-                return false;
-            }
-
-            if (root.TryGetProperty("templatedFormEnabled", out var camelCaseFlag) && camelCaseFlag.ValueKind == JsonValueKind.True)
-            {
-                return true;
-            }
-
-            if (root.TryGetProperty("TemplatedFormEnabled", out var pascalCaseFlag) && pascalCaseFlag.ValueKind == JsonValueKind.True)
-            {
-                return true;
-            }
+            if (root.ValueKind != JsonValueKind.Object) throw new InvalidOperationException("Invalid form settings configuration.");
+            if (!root.TryGetProperty("templatedFormEnabled", out var flag) && !root.TryGetProperty("TemplatedFormEnabled", out flag)) return false;
+            if (flag.ValueKind is not (JsonValueKind.True or JsonValueKind.False)) throw new InvalidOperationException("Invalid templated form setting.");
+            return flag.ValueKind == JsonValueKind.True;
         }
-        catch (JsonException)
-        {
-            return false;
-        }
-
-        return false;
+        catch (JsonException ex) { throw new InvalidOperationException("Invalid form settings configuration.", ex); }
     }
 
     private static string GetFieldEditableBy(FormFieldDefinition field)
     {
-        if (field.Metadata is null || !field.Metadata.TryGetValue(FieldSettingsMetadataKey, out var fieldSettingsJson) || string.IsNullOrWhiteSpace(fieldSettingsJson))
-        {
-            return "Any";
-        }
-
+        if (field.Metadata is null || !field.Metadata.TryGetValue(FieldSettingsMetadataKey, out var json) || string.IsNullOrWhiteSpace(json)) return "Any";
         try
         {
-            using var doc = JsonDocument.Parse(fieldSettingsJson);
+            using var doc = JsonDocument.Parse(json);
             var root = doc.RootElement;
-            if (root.ValueKind != JsonValueKind.Object)
-            {
-                return "Any";
-            }
-
-            if (root.TryGetProperty("editableBy", out var editableByValue) && editableByValue.ValueKind == JsonValueKind.String)
-            {
-                var editableBy = editableByValue.GetString();
-                return string.IsNullOrWhiteSpace(editableBy) ? "Any" : editableBy.Trim();
-            }
-
-            if (root.TryGetProperty("EditableBy", out var pascalEditableByValue) && pascalEditableByValue.ValueKind == JsonValueKind.String)
-            {
-                var editableBy = pascalEditableByValue.GetString();
-                return string.IsNullOrWhiteSpace(editableBy) ? "Any" : editableBy.Trim();
-            }
+            if (root.ValueKind != JsonValueKind.Object) throw new InvalidOperationException("Invalid field settings configuration.");
+            if (!root.TryGetProperty("editableBy", out var value) && !root.TryGetProperty("EditableBy", out value)) return "Any";
+            if (value.ValueKind != JsonValueKind.String) throw new InvalidOperationException("Invalid field editableBy configuration.");
+            var role = value.GetString();
+            return string.IsNullOrWhiteSpace(role) ? "Any" : role.Trim();
         }
-        catch (JsonException)
-        {
-            return "Any";
-        }
-
-        return "Any";
+        catch (JsonException ex) { throw new InvalidOperationException("Invalid field settings configuration.", ex); }
     }
 
-    private static void PreserveTemplatedMetadata(IReadOnlyDictionary<string, string?>? sourceAnswers, IDictionary<string, string?> targetAnswers)
-    {
-        if (sourceAnswers is null)
-        {
-            return;
-        }
+    private const string HandoffStepIdKey = "__handoff.stepId";
 
-        foreach (var key in TemplatedMetadataKeys)
+    private static bool IsReservedMetadata(string key) =>
+        key.StartsWith("__handoff.", StringComparison.OrdinalIgnoreCase) || key.StartsWith("__templated.", StringComparison.OrdinalIgnoreCase);
+
+    private static void RejectReservedFileFields(IReadOnlyList<SubmittedFileInput> files)
+    {
+        if (files.Any(f => !string.IsNullOrWhiteSpace(f.FieldId) && IsReservedMetadata(f.FieldId)))
+            throw new InvalidOperationException("File field IDs cannot use reserved handoff metadata prefixes.");
+    }
+
+    private static void StripReservedMetadata(IDictionary<string, string?> answers)
+    {
+        foreach (var key in answers.Keys.Where(IsReservedMetadata).ToList()) answers.Remove(key);
+    }
+
+    private static void RestoreReservedMetadata(IReadOnlyDictionary<string, string?>? stored, IDictionary<string, string?> answers)
+    {
+        StripReservedMetadata(answers);
+        if (stored is null) return;
+        foreach (var item in stored.Where(item => IsReservedMetadata(item.Key))) answers[item.Key] = item.Value;
+    }
+
+    private static bool HasWorkflowMetadata(IReadOnlyDictionary<string, string?> answers) => answers.Keys.Any(IsReservedMetadata);
+
+    private static Dictionary<string, string?> MergeAnswers(IReadOnlyDictionary<string, string?>? stored, IReadOnlyDictionary<string, string?> incoming)
+    {
+        var result = stored is null ? new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase) : new Dictionary<string, string?>(stored, StringComparer.OrdinalIgnoreCase);
+        foreach (var item in incoming) result[item.Key] = item.Value;
+        return result;
+    }
+
+    private static List<EntryFileRecord> MergeFiles(IReadOnlyList<EntryFileRecord>? stored, IReadOnlyList<SubmittedFileInput> incoming, IReadOnlyDictionary<string, string?> incomingAnswers, UserProfile user, int revision)
+    {
+        var replacedFields = incoming.Where(f => !string.IsNullOrWhiteSpace(f.FieldId)).Select(f => f.FieldId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var clearedFields = incomingAnswers.Where(a => string.IsNullOrWhiteSpace(a.Value)).Select(a => a.Key).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var result = stored?.Where(f => !replacedFields.Contains(f.FieldId) && !clearedFields.Contains(f.FieldId)).ToList() ?? [];
+        result.AddRange(EntryFileMapper.MapFiles(incoming, user.UserId, user.Email, revision));
+        return result;
+    }
+
+    private static void EnforceFileRemovalPermissions(FormDefinition definition, string actor, IReadOnlyList<string> steps, IReadOnlyDictionary<string, string?> incoming, IReadOnlyList<EntryFileRecord>? stored)
+    {
+        foreach (var file in stored ?? [])
         {
-            if (!targetAnswers.ContainsKey(key) && sourceAnswers.TryGetValue(key, out var value))
-            {
-                targetAnswers[key] = value;
-            }
+            var clear = incoming.Any(a => string.Equals(a.Key, file.FieldId, StringComparison.OrdinalIgnoreCase) && string.IsNullOrWhiteSpace(a.Value));
+            if (!clear) continue;
+            var field = definition.Sections.SelectMany(s => s.Fields).FirstOrDefault(f => string.Equals(f.Id, file.FieldId, StringComparison.OrdinalIgnoreCase));
+            if (field is null || !CanEditFieldForRole(GetFieldEditableBy(field), actor, steps))
+                throw new InvalidOperationException("File field is not editable by the current user in templated workflow.");
         }
+    }
+
+    private Task SaveWorkflowDraftAsync(EntryRecord entry, byte[]? expectedToken, CancellationToken cancellationToken)
+    {
+        if (expectedToken is null || expectedToken.Length == 0)
+            throw new InvalidOperationException("The draft has no concurrency token. Reload and retry.");
+        return repository.SaveDraftEntryIfUnchangedAsync(entry, expectedToken, cancellationToken);
+    }
+
+    private static void EnsureWorkflowIdentity(UserProfile user)
+    {
+        if (!user.IsAuthenticated || string.IsNullOrWhiteSpace(user.Email)) throw new InvalidOperationException("An authenticated email is required for handoff workflows.");
+    }
+
+    private static void EnsureDraftVersion(EntryRecord draft, FormVersionRecord version)
+    {
+        if (draft.FormVersionId != version.Id) throw new InvalidOperationException("This workflow draft belongs to an earlier published form version and cannot be changed.");
+    }
+
+    private string? GetHandoffUpgradeIncompatibility(FormDefinition previous, FormDefinition current, EntryRecord draft, UserProfile user)
+    {
+        try
+        {
+            if (!IsTemplatedFormEnabled(previous) || !IsTemplatedFormEnabled(current))
+                return "The handoff workflow is no longer available.";
+            var oldSteps = GetHandoffSteps(previous);
+            var newSteps = GetHandoffSteps(current);
+            if (!oldSteps.SequenceEqual(newSteps, StringComparer.Ordinal))
+                return "The handoff stages have changed.";
+            var actor = oldSteps.Count > 0
+                ? ResolveHandoffStep(oldSteps, draft.Answers)
+                : ResolveTemplatedActorRole(user, draft.Answers, draft.Answers);
+
+            var oldFields = previous.Sections.SelectMany(s => s.Fields).ToList();
+            var newFields = current.Sections.SelectMany(s => s.Fields).ToList();
+            if (oldFields.Any(f => string.IsNullOrWhiteSpace(f.Id)) || newFields.Any(f => string.IsNullOrWhiteSpace(f.Id)) ||
+                oldFields.Select(f => f.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() != oldFields.Count ||
+                newFields.Select(f => f.Id).Distinct(StringComparer.OrdinalIgnoreCase).Count() != newFields.Count)
+                return "The form contains invalid or duplicate field identifiers.";
+            var byId = newFields.ToDictionary(f => f.Id, StringComparer.OrdinalIgnoreCase);
+            foreach (var oldField in oldFields)
+            {
+                if (!byId.TryGetValue(oldField.Id, out var newField) ||
+                    JsonSerializer.Serialize(oldField) != JsonSerializer.Serialize(newField))
+                    return "An existing question has changed or been removed.";
+            }
+            if (draft.Files.Any(file => !byId.ContainsKey(file.FieldId)))
+                return "An attachment no longer has a matching question.";
+
+            if (oldSteps.Count > 0)
+            {
+                foreach (var completedStep in oldSteps.Take(oldSteps.IndexOf(actor)))
+                    EnsureRequiredHandoffFields(current, newSteps, completedStep, draft.Answers);
+            }
+            else if (actor == "Recipient")
+            {
+                EnsureRequiredHandoffFields(current, newSteps, "Initiator", draft.Answers);
+            }
+            return null;
+        }
+        catch (InvalidOperationException)
+        {
+            return "The updated form has an invalid handoff configuration or requires answers from an earlier participant.";
+        }
+    }
+
+    private Dictionary<string, string?> PrepareWorkflowRevision(FormDefinition definition, EntryRecord entry, UserProfile user, IReadOnlyDictionary<string, string?> incoming)
+    {
+        if (!IsTemplatedFormEnabled(definition)) throw new InvalidOperationException("The submission's handoff workflow is no longer available.");
+        var steps = GetHandoffSteps(definition);
+        var answers = MergeAnswers(entry.Answers, incoming);
+        RestoreReservedMetadata(entry.Answers, answers);
+        ApplyFormulaFields(definition, answers);
+        var actor = steps.Count > 0 ? ResolveHandoffStep(steps, entry.Answers) : ResolveTemplatedActorRole(user, answers, entry.Answers);
+        if ((steps.Count > 0 && actor != steps[^1]) || (steps.Count == 0 && actor != "Recipient"))
+            throw new InvalidOperationException("Only the final handoff recipient can revise this submission.");
+        EnforceTemplatedFieldPermissions(definition, actor, steps, answers, entry.Answers, []);
+        return answers;
+    }
+
+    private static List<string> GetHandoffSteps(FormDefinition definition)
+    {
+        if (definition.Sections.SelectMany(s => s.Fields).Any(f => IsReservedMetadata(f.Id)))
+            throw new InvalidOperationException("Field IDs cannot use reserved handoff metadata prefixes.");
+        if (!definition.Metadata.TryGetValue(FormSettingsMetadataKey, out var json) || string.IsNullOrWhiteSpace(json)) return [];
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object || !doc.RootElement.TryGetProperty("handoffSteps", out var array)) return [];
+            if (array.ValueKind != JsonValueKind.Array) throw new InvalidOperationException("Invalid handoff steps configuration.");
+            if (array.GetArrayLength() == 0) return [];
+            var ids = new List<string>();
+            foreach (var step in array.EnumerateArray())
+            {
+                if (step.ValueKind != JsonValueKind.Object || !step.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.String ||
+                    !step.TryGetProperty("name", out var name) || name.ValueKind != JsonValueKind.String ||
+                    string.IsNullOrWhiteSpace(id.GetString()) || string.IsNullOrWhiteSpace(name.GetString()) ||
+                    id.GetString() != id.GetString()!.Trim() || ids.Contains(id.GetString()!, StringComparer.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("Invalid handoff steps configuration.");
+                ids.Add(id.GetString()!);
+            }
+            if (ids.Count < 2) throw new InvalidOperationException("At least two handoff steps are required.");
+            return ids;
+        }
+        catch (JsonException ex) { throw new InvalidOperationException("Invalid handoff steps configuration.", ex); }
+    }
+
+    private static string ResolveHandoffStep(List<string> steps, IReadOnlyDictionary<string, string?>? stored)
+    {
+        if (stored is null) return steps[0];
+        if (!stored.TryGetValue(HandoffStepIdKey, out var id) || id is null || !steps.Contains(id, StringComparer.Ordinal))
+            throw new InvalidOperationException("The draft has an invalid or missing handoff step.");
+        return id;
     }
 
     private static string ResolveTemplatedMetadataValue(IReadOnlyDictionary<string, string?> primary, IReadOnlyDictionary<string, string?>? fallback, string key)
@@ -2407,35 +2735,75 @@ public sealed class FormsApplicationService(
         return "Initiator";
     }
 
-    private static bool CanEditFieldForRole(string editableBy, string actorRole)
-        => string.Equals(editableBy, "Any", StringComparison.OrdinalIgnoreCase)
-           || string.Equals(editableBy, actorRole, StringComparison.OrdinalIgnoreCase);
+    private void ValidateDurationAnswers(FormDefinition definition, IReadOnlyDictionary<string, string?> answers,
+        string? actorRole = null, IReadOnlyList<string>? steps = null)
+    {
+        foreach (var section in definition.Sections.Where(section => VisibilityEvaluationHelper.IsSectionVisible(conditionEvaluator, section, answers)))
+        {
+            foreach (var field in section.Fields.Where(field => field.Kind == FormFieldKind.Duration
+                && (actorRole is null || CanEditFieldForRole(GetFieldEditableBy(field), actorRole, steps ?? []))
+                && VisibilityEvaluationHelper.IsFieldVisible(conditionEvaluator, field, answers)))
+            {
+                answers.TryGetValue(field.Id, out var value);
+                if (string.IsNullOrWhiteSpace(value) && (!field.Required || field.ReadOnly)) continue;
+                if (!DateRangeValue.TryParse(value, out var range) || !range.IsComplete)
+                    throw new InvalidOperationException($"Duration '{field.Label}' requires valid start and end dates; end cannot precede start.");
+            }
+        }
+    }
+
+    private void EnsureRequiredHandoffFields(FormDefinition definition, IReadOnlyList<string> steps, string actor, IReadOnlyDictionary<string, string?> answers)
+    {
+        foreach (var section in definition.Sections)
+        {
+            if (!VisibilityEvaluationHelper.IsSectionVisible(conditionEvaluator, section, answers)) continue;
+            foreach (var field in section.Fields)
+            {
+                var informationField = field.Kind == FormFieldKind.Custom &&
+                    (string.IsNullOrWhiteSpace(field.CustomKind) || string.Equals(field.CustomKind.Trim(), "information", StringComparison.OrdinalIgnoreCase));
+                if (!field.Required || field.ReadOnly || field.Kind == FormFieldKind.Checkbox || informationField ||
+                    !CanEditFieldForRole(GetFieldEditableBy(field), actor, steps) ||
+                    !VisibilityEvaluationHelper.IsFieldVisible(conditionEvaluator, field, answers)) continue;
+                if (!answers.TryGetValue(field.Id, out var value) || string.IsNullOrWhiteSpace(value)
+                    || (field.Kind == FormFieldKind.Duration && (!DateRangeValue.TryParse(value, out var range) || !range.IsComplete)))
+                    throw new InvalidOperationException($"Required field '{field.Label}' must be completed before advancing the handoff.");
+            }
+        }
+    }
+
+    private static bool CanEditFieldForRole(string editableBy, string actorRole, IReadOnlyList<string> steps)
+    {
+        if (string.Equals(editableBy, "Any", StringComparison.OrdinalIgnoreCase)) return true;
+        if (steps.Count == 0) return string.Equals(editableBy, actorRole, StringComparison.OrdinalIgnoreCase);
+        if (string.Equals(editableBy, "Initiator", StringComparison.OrdinalIgnoreCase)) return actorRole == steps[0];
+        if (string.Equals(editableBy, "Recipient", StringComparison.OrdinalIgnoreCase)) return actorRole == steps[^1];
+        return editableBy.StartsWith("Step:", StringComparison.OrdinalIgnoreCase) && string.Equals(editableBy[5..], actorRole, StringComparison.Ordinal);
+    }
 
     private static string? NormalizeFieldValue(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static void EnforceTemplatedFieldPermissions(
         FormDefinition definition,
-        UserProfile user,
+        string actorRole,
+        IReadOnlyList<string> steps,
         IReadOnlyDictionary<string, string?> incomingAnswers,
-        IReadOnlyDictionary<string, string?>? baselineAnswers)
+        IReadOnlyDictionary<string, string?>? baselineAnswers,
+        IReadOnlyList<SubmittedFileInput> files)
     {
-        var actorRole = ResolveTemplatedActorRole(user, incomingAnswers, baselineAnswers);
-        foreach (var field in definition.Sections.SelectMany(section => section.Fields))
+        var fields = definition.Sections.SelectMany(section => section.Fields).ToList();
+        foreach (var file in files)
         {
-            var editableBy = GetFieldEditableBy(field);
-            if (CanEditFieldForRole(editableBy, actorRole))
-            {
-                continue;
-            }
-
+            var field = fields.FirstOrDefault(f => string.Equals(f.Id, file.FieldId, StringComparison.OrdinalIgnoreCase));
+            if (field is null || IsReservedMetadata(field.Id) || IsFormulaField(field) || !CanEditFieldForRole(GetFieldEditableBy(field), actorRole, steps))
+                throw new InvalidOperationException("File field is not editable by the current user in templated workflow.");
+        }
+        foreach (var field in fields)
+        {
+            if (IsFormulaField(field) || CanEditFieldForRole(GetFieldEditableBy(field), actorRole, steps)) continue;
             incomingAnswers.TryGetValue(field.Id, out var incomingValue);
             string? baselineValue = null;
-            if (baselineAnswers is not null)
-            {
-                baselineAnswers.TryGetValue(field.Id, out baselineValue);
-            }
-
+            if (baselineAnswers is not null) baselineAnswers.TryGetValue(field.Id, out baselineValue);
             if (!string.Equals(NormalizeFieldValue(incomingValue), NormalizeFieldValue(baselineValue), StringComparison.Ordinal))
             {
                 var label = string.IsNullOrWhiteSpace(field.Label) ? field.Id : field.Label;
@@ -2446,14 +2814,16 @@ public sealed class FormsApplicationService(
 
     // ── Formula field helpers ────────────────────────────────────────────────
 
+    private static bool IsFormulaField(FormFieldDefinition field) =>
+        (field.Kind == FormFieldKind.Calculated || field.Kind == FormFieldKind.Hidden) && !string.IsNullOrWhiteSpace(field.FormulaExpression);
+
     private void ApplyFormulaFields(FormDefinition definition, Dictionary<string, string?> answers)
     {
         foreach (var field in definition.Sections.SelectMany(s => s.Fields))
         {
-            if ((field.Kind == FormFieldKind.Calculated || field.Kind == FormFieldKind.Hidden)
-                && !string.IsNullOrWhiteSpace(field.FormulaExpression))
+            if (IsFormulaField(field))
             {
-                answers[field.Id] = formulaEvaluator.Evaluate(field.FormulaExpression, answers);
+                answers[field.Id] = formulaEvaluator.Evaluate(field.FormulaExpression!, answers);
             }
         }
     }
