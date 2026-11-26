@@ -2028,6 +2028,11 @@ public sealed class FormsApplicationService(
                                 throw new InvalidOperationException($"Field '{field.Label}' column '{column.Id}' must have a label.");
                             }
 
+                            if (column.WidthUnits is < 1 or > 12)
+                            {
+                                throw new InvalidOperationException($"Field '{field.Label}' column '{column.Label}' width must be between 1 and 12.");
+                            }
+
                             if (column.Kind == RepeatableColumnKind.Select)
                             {
                                 if (column.Options.Count == 0)

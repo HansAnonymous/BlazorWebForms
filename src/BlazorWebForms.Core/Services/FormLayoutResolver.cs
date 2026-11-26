@@ -21,14 +21,36 @@ public static class FormLayoutResolver
     }
 
     public static int ResolveFieldGridColumns(FormFieldDefinition field, FormSectionDefinition section) =>
-        ResolveFieldWidthHint(field) switch
+        int.TryParse(NormalizeWidthHint(field.Layout?.WidthHint), out var width)
+            ? width
+            : 12 / ResolveSectionColumns(section);
+
+    public static string NormalizeWidthHint(string? hint)
+    {
+        var value = hint?.Trim();
+        if (int.TryParse(value, out var width) && width is >= 1 and <= 12)
+            return width.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
+        return value?.ToUpperInvariant() switch
         {
-            "Half" => 6,
-            "Third" => 4,
-            "TwoThirds" => 8,
-            "Full" => 12,
-            _ => 12 / ResolveSectionColumns(section)
+            "HALF" => "6",
+            "THIRD" => "4",
+            "TWOTHIRDS" => "8",
+            "FULL" => "12",
+            _ => "Auto"
         };
+    }
+
+    public static int ResolveRepeatableColumnWidth(RepeatableListColumnDefinition column, FormFieldDefinition field)
+    {
+        if (column.WidthUnits is >= 1 and <= 12)
+            return column.WidthUnits.Value;
+
+        var columns = field.RepeatableColumnsPerItem.GetValueOrDefault();
+        if (columns <= 0)
+            columns = Math.Max(field.RepeatableColumns.Count, 1);
+        return 12 / Math.Clamp(columns, 1, 4);
+    }
 
     public static string ResolveFieldWidthHint(FormFieldDefinition field)
     {
@@ -37,6 +59,9 @@ public static class FormLayoutResolver
         {
             return "Auto";
         }
+
+        if (int.TryParse(hint.Trim(), out var width) && width is >= 1 and <= 12)
+            return width.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
         return hint.Trim() switch
         {

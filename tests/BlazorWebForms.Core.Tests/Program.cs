@@ -229,6 +229,22 @@ foreach (var (columns, expected) in new[] { (1, 12), (2, 6), (3, 4), (4, 3), (0,
     }
 }
 
+foreach (var units in Enumerable.Range(1, 12))
+{
+    var field = new FormFieldDefinition { Layout = new FormFieldLayoutDefinition { WidthHint = units.ToString() } };
+    Assert(FormLayoutResolver.ResolveFieldGridColumns(field, new FormSectionDefinition()) == units, $"Numeric field width {units}.");
+    Assert(FormLayoutResolver.ResolveFieldWidthHint(field) == units.ToString(), $"Numeric field hint {units}.");
+}
+Assert(FormLayoutResolver.NormalizeWidthHint("twoThirds") == "8", "Legacy hints convert to numeric widths.");
+Assert(FormLayoutResolver.NormalizeWidthHint("13") == "Auto", "Invalid numeric widths fall back to auto.");
+var repeatableField = new FormFieldDefinition { RepeatableColumnsPerItem = 3 };
+var repeatableColumn = new RepeatableListColumnDefinition();
+Assert(FormLayoutResolver.ResolveRepeatableColumnWidth(repeatableColumn, repeatableField) == 4, "Automatic repeatable width follows columns per item.");
+repeatableColumn.WidthUnits = 7;
+Assert(FormLayoutResolver.ResolveRepeatableColumnWidth(repeatableColumn, repeatableField) == 7, "Explicit repeatable width overrides the automatic layout.");
+var repeatableJson = System.Text.Json.JsonSerializer.Serialize(repeatableColumn);
+Assert(System.Text.Json.JsonSerializer.Deserialize<RepeatableListColumnDefinition>(repeatableJson)?.WidthUnits == 7, "Repeatable width survives serialization.");
+
 var localizedDefinition = DemoFormFactory.CreateDefaultDefinition();
 localizedDefinition.DefaultCulture = "en-US";
 localizedDefinition.Title = "Travel request";

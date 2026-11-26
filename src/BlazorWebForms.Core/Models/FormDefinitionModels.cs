@@ -200,6 +200,7 @@ public sealed class RepeatableListColumnDefinition
     public RepeatableColumnKind Kind { get; set; } = RepeatableColumnKind.Text;
     public string Placeholder { get; set; } = string.Empty;
     public bool Required { get; set; }
+    public int? WidthUnits { get; set; }
     public List<FormFieldOption> Options { get; set; } = [];
     public Dictionary<string, string> LocalizedLabels { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public Dictionary<string, string> LocalizedPlaceholders { get; set; } = new(StringComparer.OrdinalIgnoreCase);
