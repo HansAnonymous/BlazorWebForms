@@ -125,6 +125,8 @@ public class ApprovalStepEntity
     public int AcceptorMode { get; set; }
     public string AcceptorsJson { get; set; } = "[]";
     public string Instructions { get; set; } = string.Empty;
+    public bool IsPreSubmission { get; set; }
+    public bool RequireSignature { get; set; }
     public int Status { get; set; }
     public string? Signature { get; set; }
     public string? RejectionReason { get; set; }

@@ -536,6 +536,7 @@ var receiptStored = await app.StoreFileAsync(new FileUploadRequest
     Content = "receipt-pdf"u8.ToArray()
 });
 
+repository.DetachedEntries = true;
 var entry = await app.SubmitEntryAsync(form.Id, new SubmitEntryRequest
 {
     Answers = new Dictionary<string, string?>
@@ -580,6 +581,7 @@ var revised = await app.ReviseEntryAsync(entry.Id, new Dictionary<string, string
     ["destination"] = "Seattle"
 });
 Assert(revised.Revisions.Count == 2, "Revision appends history instead of overwrite.");
+Assert(revised.Status == EntryStatus.NeedsApproval, $"Revision preserves the pending approval state; actual: {revised.Status}.");
 
 var overwriteDefinition = DemoFormFactory.CreateDefaultDefinition();
 var overwriteForm = await app.SaveDraftAsync(new SaveDraftRequest
@@ -726,6 +728,7 @@ using (var openedReader = new StreamReader(openedFile.Content))
     Assert(!string.IsNullOrWhiteSpace(openedContent), "Authorized file download returns stored content.");
 }
 
+repository.DetachedEntries = true;
 var workflowForm = await app.SaveDraftAsync(new SaveDraftRequest
 {
     Name = "Workflow form",
@@ -1672,7 +1675,7 @@ internal sealed class FakeRepository : IFormsRepository
         }
         lock (entryLock)
         {
-            if (!entries.TryGetValue(entry.Id, out var current) || current.Status != EntryStatus.Draft || current.ConcurrencyToken is null || !current.ConcurrencyToken.SequenceEqual(expectedToken))
+            if (!entries.TryGetValue(entry.Id, out var current) || current.Status is not (EntryStatus.Draft or EntryStatus.NeedsApproval) || current.ConcurrencyToken is null || !current.ConcurrencyToken.SequenceEqual(expectedToken))
                 throw new InvalidOperationException("The draft was changed by another request. Reload and retry.");
             entry.ConcurrencyToken = BitConverter.GetBytes(++nextToken);
             entries[entry.Id] = Copy(entry);

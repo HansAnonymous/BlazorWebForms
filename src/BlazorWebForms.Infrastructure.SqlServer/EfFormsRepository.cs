@@ -24,46 +24,20 @@ internal sealed class EfFormsRepository : IFormsRepository
 
     public async Task SeedAsync(CancellationToken cancellationToken = default)
     {
-        var requiresMigration = false;
-        try
-        {
-            var hasAppliedMigrations = await db.Database
-                .SqlQueryRaw<int>("""
-                    SELECT CAST(CASE
-                        WHEN OBJECT_ID(N'__EFMigrationsHistory', N'U') IS NOT NULL
-                             AND EXISTS (SELECT 1 FROM [__EFMigrationsHistory])
-                        THEN 1 ELSE 0 END AS int) AS [Value]
-                    """)
-                .SingleAsync(cancellationToken) == 1;
+        // EF checks for the history table before querying it, which also works for
+        // existing databases created outside migrations. Connection errors must surface.
+        var hasAppliedMigrations = (await db.Database.GetAppliedMigrationsAsync(cancellationToken)).Any();
+        var formsTableExists = await db.Database
+            .SqlQueryRaw<int>("""
+                SELECT CAST(CASE
+                    WHEN OBJECT_ID(N'Forms', N'U') IS NOT NULL
+                    THEN 1 ELSE 0 END AS int) AS [Value]
+                """)
+            .SingleAsync(cancellationToken) == 1;
 
-            var formsTableExists = await db.Database
-                .SqlQueryRaw<int>("""
-                    SELECT CAST(CASE
-                        WHEN OBJECT_ID(N'Forms', N'U') IS NOT NULL
-                        THEN 1 ELSE 0 END AS int) AS [Value]
-                    """)
-                .SingleAsync(cancellationToken) == 1;
-
-            requiresMigration = hasAppliedMigrations || !formsTableExists;
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException and not StackOverflowException)
+        if (hasAppliedMigrations || !formsTableExists)
         {
-            // Probe query can fail when database/table doesn't exist yet — this is expected on first run.
-            logger.LogDebug(ex, "Database probe failed during seed. Falling back to migration path.");
-            requiresMigration = true;
-        }
-
-        if (requiresMigration)
-        {
-            try
-            {
-                await db.Database.MigrateAsync(cancellationToken);
-            }
-            catch (InvalidOperationException ex) when (ex.Message.Contains("PendingModelChangesWarning", StringComparison.Ordinal))
-            {
-                logger.LogWarning(ex, "Pending model changes detected during migration. Falling back to EnsureCreated.");
-                await db.Database.EnsureCreatedAsync(cancellationToken);
-            }
+            await db.Database.MigrateAsync(cancellationToken);
         }
 
         await EnsureLegacySchemaCompatibilityAsync(cancellationToken);
@@ -380,6 +354,20 @@ internal sealed class EfFormsRepository : IFormsRepository
                 ALTER TABLE [ApprovalSteps]
                 ADD [Instructions] NVARCHAR(4000) NOT NULL
                     CONSTRAINT [DF_ApprovalSteps_Instructions] DEFAULT (N'');
+            END;
+
+            IF OBJECT_ID(N'ApprovalSteps', N'U') IS NOT NULL
+               AND COL_LENGTH(N'ApprovalSteps', N'IsPreSubmission') IS NULL
+            BEGIN
+                ALTER TABLE [ApprovalSteps]
+                ADD [IsPreSubmission] BIT NOT NULL CONSTRAINT [DF_ApprovalSteps_IsPreSubmission] DEFAULT (0);
+            END;
+
+            IF OBJECT_ID(N'ApprovalSteps', N'U') IS NOT NULL
+               AND COL_LENGTH(N'ApprovalSteps', N'RequireSignature') IS NULL
+            BEGIN
+                ALTER TABLE [ApprovalSteps]
+                ADD [RequireSignature] BIT NOT NULL CONSTRAINT [DF_ApprovalSteps_RequireSignature] DEFAULT (0);
             END;
 
             IF OBJECT_ID(N'ApprovalSteps', N'U') IS NOT NULL
@@ -1084,8 +1072,8 @@ internal sealed class EfFormsRepository : IFormsRepository
 
             if (expectedToken is not null)
             {
-                if (existing is null || existing.Status != (int)EntryStatus.Draft)
-                    throw new InvalidOperationException("The draft was changed by another request. Reload and retry.");
+                if (existing is null || existing.Status is not ((int)EntryStatus.Draft) and not ((int)EntryStatus.NeedsApproval))
+                    throw new InvalidOperationException("The workflow entry was changed by another request. Reload and retry.");
                 db.Entry(existing).Property(x => x.RowVersion).OriginalValue = expectedToken;
                 // Force the rowversion predicate even if all scalar values are unchanged.
                 db.Entry(existing).Property(x => x.SubmittedUtc).IsModified = true;
@@ -1142,6 +1130,8 @@ internal sealed class EfFormsRepository : IFormsRepository
                         AcceptorMode = (int)a.AcceptorMode,
                         AcceptorsJson = JsonSerializer.Serialize(a.Acceptors),
                         Instructions = a.Instructions,
+                        IsPreSubmission = a.IsPreSubmission,
+                        RequireSignature = a.RequireSignature,
                         Status = (int)a.Status,
                         Signature = a.Signature,
                         RejectionReason = a.RejectionReason,
@@ -1160,6 +1150,8 @@ internal sealed class EfFormsRepository : IFormsRepository
                 existingStep.AcceptorMode = (int)a.AcceptorMode;
                 existingStep.AcceptorsJson = JsonSerializer.Serialize(a.Acceptors);
                 existingStep.Instructions = a.Instructions;
+                existingStep.IsPreSubmission = a.IsPreSubmission;
+                existingStep.RequireSignature = a.RequireSignature;
                 existingStep.Status = (int)a.Status;
                 existingStep.Signature = a.Signature;
                 existingStep.RejectionReason = a.RejectionReason;
@@ -1525,6 +1517,8 @@ internal sealed class EfFormsRepository : IFormsRepository
                     ? []
                     : (JsonSerializer.Deserialize<List<ApprovalAcceptor>>(a.AcceptorsJson) ?? []),
                 Instructions = a.Instructions,
+                IsPreSubmission = a.IsPreSubmission,
+                RequireSignature = a.RequireSignature,
                 Status = (ApprovalStepStatus)a.Status,
                 Signature = a.Signature,
                 RejectionReason = a.RejectionReason,

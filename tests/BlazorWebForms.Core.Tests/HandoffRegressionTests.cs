@@ -2,6 +2,8 @@ using BlazorWebForms.Core.Abstractions;
 using BlazorWebForms.Core.Models;
 using BlazorWebForms.Core.Services;
 using Microsoft.Extensions.DependencyInjection;
+using System.Text.Json;
+using System.Text.Json.Nodes;
 
 internal static class HandoffRegressionTests
 {
@@ -163,7 +165,192 @@ internal static class HandoffRegressionTests
         var legacySubmitted = await app.SubmitEntryAsync(legacyForm.Id, new() { DraftEntryId = legacyDraft.Id, Answers = new() { ["to"] = "second" } });
         Check(legacySubmitted.Answers["from"] == "first" && legacySubmitted.Answers["to"] == "second", "Upgraded legacy handoff remains functional");
         await TestDraftUpgradeAsync(app, repo, users, serializer);
+        await TestUnifiedWorkflowAsync(app, repo, users, serializer);
         Console.WriteLine("Handoff regression tests passed.");
+    }
+
+    private static async Task TestUnifiedWorkflowAsync(FormsApplicationService app, FakeRepository repo, MutableUserContext users, IFormDefinitionSerializer serializer)
+    {
+        var condition = JsonSerializer.Serialize(new VisibilityConditionDefinition
+        {
+            Rules = [new VisibilityRuleDefinition { FieldId = "category", Operator = VisibilityRuleOperator.Equals, Value = "yes" }]
+        });
+        var definition = new FormDefinition
+        {
+            Title = "Unified workflow",
+            Metadata =
+            {
+                ["approvers"] = JsonSerializer.Serialize(new[]
+                {
+                    new { id = "pre", label = "Draft reviewer", employeeId = "10", approverDisplayName = "Draft Reviewer", approverEmail = "reviewer@example.com", requireSignature = true, approvalTiming = "BeforeSubmission" },
+                    new { id = "legal", label = "Legal", employeeId = "11", approverDisplayName = "Legal Reviewer", approverEmail = "legal@example.com", requireSignature = false, approvalTiming = "AfterSubmission" },
+                    new { id = "conditional", label = "Conditional", employeeId = "12", approverDisplayName = "Conditional Reviewer", approverEmail = "conditional@example.com", requireSignature = false, approvalTiming = "AfterSubmission" }
+                }),
+                ["form.settings"] = JsonSerializer.Serialize(new
+                {
+                    templatedFormEnabled = true,
+                    handoffSteps = new[] { new { id = "start", name = "Initiator" }, new { id = "final", name = "Submitter" } },
+                    approverConditionsJson = new Dictionary<string, string> { ["conditional"] = condition }
+                })
+            },
+            Sections = [new FormSectionDefinition { Fields = [Field("category", "Any"), Field("answer", "Any"), Field("attachment", "Any")] }]
+        };
+        var form = new FormAggregate { Name = "Unified workflow", Publication = { AccessMode = FormAccessMode.Authenticated } };
+        form.Versions.Add(new FormVersionRecord { VersionNumber = 1, DefinitionJson = serializer.Serialize(definition) });
+        await repo.SaveFormAsync(form);
+
+        users.Email = "origin@example.com";
+        var file = new SubmittedFileInput { FieldId = "attachment", File = new StoredFile { FileName = "same.txt", RelativePath = "one.txt", Sha256 = "hash-one" } };
+        var draft = await app.SaveDraftSubmissionAsync(form.Id, new()
+        {
+            Answers = new() { ["category"] = "yes", ["answer"] = "initial" },
+            Files = [file],
+            Approvers = [new() { Id = "pre", Email = "spoof@example.com" }]
+        });
+        await app.TransferDraftSubmissionAsync(form.Id, new() { DraftEntryId = draft.Id, RecipientEmail = "final@example.com" });
+        users.Email = "final@example.com";
+        draft = await app.SaveDraftSubmissionAsync(form.Id, new()
+        {
+            DraftEntryId = draft.Id,
+            Answers = new() { ["answer"] = "ready" },
+            Approvers = [new() { Id = "pre", Email = "spoof@example.com" }, new() { Id = "legal", Email = "spoof@example.com" }]
+        });
+        var submitRequest = new SubmitEntryRequest
+        {
+            DraftEntryId = draft.Id,
+            Answers = new() { ["answer"] = "ready" },
+            Approvers = [new() { Id = "pre", Email = "spoof@example.com" }, new() { Id = "legal", Email = "spoof@example.com" }]
+        };
+        var waitingForDraftApproval = await app.SubmitEntryAsync(form.Id, submitRequest);
+        Check(waitingForDraftApproval.Status == EntryStatus.NeedsApproval && waitingForDraftApproval.ApprovalSteps.Count == 1 &&
+              waitingForDraftApproval.ApprovalSteps[0].IsPreSubmission && waitingForDraftApproval.ApprovalSteps[0].ApproverEmail == "reviewer@example.com" &&
+              waitingForDraftApproval.ApprovalSteps[0].RequireSignature,
+            "Configured pre-submission approver is enforced from server configuration, not caller assignments");
+
+        users.Email = "reviewer@example.com";
+        await Throws(() => app.RejectDraftApprovalAsync(draft.Id, waitingForDraftApproval.ApprovalSteps[0].Id, new()
+        {
+            Reason = "Return for correction", TargetStageId = "invalid", RecipientEmail = "return@example.com"
+        }), "Invalid draft return stage is rejected");
+        var returned = await app.RejectDraftApprovalAsync(draft.Id, waitingForDraftApproval.ApprovalSteps[0].Id, new()
+        {
+            Reason = "Return for correction", TargetStageId = "start", RecipientEmail = "return@example.com", RecipientDisplayName = "Return Owner"
+        });
+        Check(returned.Status == EntryStatus.Draft && returned.SubmittedByEmail == "return@example.com" && returned.Answers["__handoff.stepId"] == "start" &&
+              returned.ApprovalAuditTrail.Any(audit => audit.Action == ApprovalAuditAction.StepRejected && audit.Reason == "Return for correction"),
+            "Draft rejection records the decision and assigns the explicitly selected recipient and stage");
+
+        users.Email = "return@example.com";
+        draft = await app.SaveDraftSubmissionAsync(form.Id, new() { DraftEntryId = draft.Id, Answers = new() { ["answer"] = "ready" } });
+        await app.TransferDraftSubmissionAsync(form.Id, new() { DraftEntryId = draft.Id, RecipientEmail = "final@example.com" });
+        users.Email = "final@example.com";
+        draft = await app.SaveDraftSubmissionAsync(form.Id, new() { DraftEntryId = draft.Id, Answers = new() { ["answer"] = "ready" } });
+        waitingForDraftApproval = await app.SubmitEntryAsync(form.Id, new()
+        {
+            DraftEntryId = draft.Id,
+            Answers = new() { ["answer"] = "ready" },
+            Approvers = [new() { Id = "pre", Email = "spoof@example.com" }]
+        });
+        Check(waitingForDraftApproval.Status == EntryStatus.NeedsApproval && waitingForDraftApproval.ApprovalSteps.Single().ApproverEmail == "reviewer@example.com",
+            "Returning to a previous stage cannot skip the required pre-submission approval");
+        await Throws(() => app.SubmitEntryAsync(form.Id, new() { DraftEntryId = draft.Id }), "Pending draft approval cannot be resubmitted or bypassed");
+
+        users.Email = "reviewer@example.com";
+        await Throws(() => app.ApproveStepAsync(draft.Id, waitingForDraftApproval.ApprovalSteps.Single().Id, string.Empty),
+            "Required approval signature is enforced server-side");
+        var approvedDraft = await app.ApproveStepAsync(draft.Id, waitingForDraftApproval.ApprovalSteps.Single().Id, "signed-draft-v1");
+        Check(approvedDraft.Status == EntryStatus.Draft && approvedDraft.ApprovalAuditTrail.Any(audit => audit.Signature == "signed-draft-v1"),
+            "Completing all pre-submission approvals returns the editable draft with signature history");
+
+        users.Email = "final@example.com";
+        var changedFile = new SubmittedFileInput { FieldId = "attachment", File = new StoredFile { FileName = "same.txt", RelativePath = "two.txt", Sha256 = "hash-two" } };
+        var editedDraft = await app.SaveDraftSubmissionAsync(form.Id, new()
+        {
+            DraftEntryId = draft.Id,
+            Answers = new() { ["answer"] = "ready" },
+            Files = [changedFile]
+        });
+        Check(editedDraft.ApprovalSteps.Single().Status == ApprovalStepStatus.Pending &&
+              editedDraft.ApprovalAuditTrail.Any(audit => audit.Signature == "signed-draft-v1") && editedDraft.Files.Single().Sha256 == "hash-two",
+            "A file-only edit resets prior draft approval while retaining its signed audit history");
+        waitingForDraftApproval = await app.SubmitEntryAsync(form.Id, new()
+        {
+            DraftEntryId = editedDraft.Id,
+            Answers = new() { ["answer"] = "ready" },
+            Approvers = [new() { Id = "pre", Email = "spoof@example.com" }]
+        });
+        Check(waitingForDraftApproval.Status == EntryStatus.NeedsApproval && waitingForDraftApproval.ApprovalSteps.Count == 1 &&
+              waitingForDraftApproval.ApprovalSteps.Single().Status == ApprovalStepStatus.Pending,
+            "Edits made after draft approval require approval again before submission");
+
+        users.Email = "reviewer@example.com";
+        approvedDraft = await app.ApproveStepAsync(editedDraft.Id, waitingForDraftApproval.ApprovalSteps.Single().Id, "signed-draft-v2");
+        Check(approvedDraft.Status == EntryStatus.Draft, "Repeated draft approval returns the draft to its submitter");
+        users.Email = "final@example.com";
+        var submittedForPostApproval = await app.SubmitEntryAsync(form.Id, new()
+        {
+            DraftEntryId = approvedDraft.Id,
+            Answers = new() { ["answer"] = "ready" },
+            Approvers = [new() { Id = "pre", Email = "spoof@example.com" }]
+        });
+        Check(submittedForPostApproval.Status == EntryStatus.NeedsApproval && submittedForPostApproval.ApprovalSteps.Count == 3 &&
+              submittedForPostApproval.ApprovalSteps.Single(step => step.ApproverId == "pre").Status == ApprovalStepStatus.Approved &&
+              submittedForPostApproval.ApprovalSteps.Single(step => step.ApproverId == "legal").ApproverEmail == "legal@example.com" &&
+              submittedForPostApproval.ApprovalSteps.Single(step => step.ApproverId == "conditional").ApproverEmail == "conditional@example.com",
+            "Approved drafts proceed to assigned post-submission reviewers with conditional stages evaluated from answers");
+
+        users.Email = "legal@example.com";
+        var postApproval = await app.ApproveStepAsync(submittedForPostApproval.Id,
+            submittedForPostApproval.ApprovalSteps.Single(step => step.ApproverId == "legal").Id, string.Empty);
+        var approvalCopy = JsonSerializer.Deserialize<EntryRecord>(JsonSerializer.Serialize(postApproval))!;
+        approvalCopy.Id = Guid.NewGuid();
+        await repo.SaveEntryAsync(approvalCopy);
+
+        users.Email = "conditional@example.com";
+        var rejectedAfterSubmission = await app.RejectStepAsync(postApproval.Id,
+            postApproval.ApprovalSteps.Single(step => step.ApproverId == "conditional").Id, "Update required");
+        users.Email = "final@example.com";
+        var resubmitted = await app.ResubmitEntryAsync(rejectedAfterSubmission.Id, new()
+        {
+            Answers = new() { ["category"] = "yes", ["answer"] = "ready" },
+            Approvers = [new() { Id = "pre", Email = "spoof@example.com" }]
+        });
+        Check(resubmitted.Status == EntryStatus.NeedsApproval && resubmitted.ApprovalSteps.Count == 1 &&
+              resubmitted.ApprovalSteps.Single().IsPreSubmission && resubmitted.ApprovalSteps.Single().RequireSignature &&
+              resubmitted.ApprovalSteps.Single().ApproverEmail == "reviewer@example.com",
+            "Resubmission after a post-approval rejection restarts assigned, signed pre-submission approval");
+        users.Email = "reviewer@example.com";
+        var reapproved = await app.ApproveStepAsync(resubmitted.Id, resubmitted.ApprovalSteps.Single().Id, "signed-resubmission");
+        Check(reapproved.Status == EntryStatus.Draft, "Resubmission must complete pre-approval before it can be submitted again");
+        var upgradeCandidate = JsonSerializer.Deserialize<EntryRecord>(JsonSerializer.Serialize(reapproved))!;
+        upgradeCandidate.Id = Guid.NewGuid();
+        await repo.SaveEntryAsync(upgradeCandidate);
+
+        users.Email = "final@example.com";
+        var secondSubmission = await app.SubmitEntryAsync(form.Id, new()
+        {
+            DraftEntryId = reapproved.Id,
+            Answers = new() { ["category"] = "yes", ["answer"] = "ready" },
+            Approvers = [new() { Id = "pre", Email = "spoof@example.com" }]
+        });
+        users.Email = "legal@example.com";
+        var secondPostApproval = await app.ApproveStepAsync(secondSubmission.Id,
+            secondSubmission.ApprovalSteps.Single(step => step.ApproverId == "legal").Id, string.Empty);
+        users.Email = "conditional@example.com";
+        var fullyApproved = await app.ApproveStepAsync(secondPostApproval.Id,
+            secondPostApproval.ApprovalSteps.Single(step => step.ApproverId == "conditional").Id, string.Empty);
+        Check(fullyApproved.Status == EntryStatus.Approved, "Post-submission approvals complete after pre-approval on resubmission");
+
+        var changedApprovalDefinition = serializer.Deserialize(form.Versions[0].DefinitionJson);
+        var approverConfiguration = JsonNode.Parse(changedApprovalDefinition.Metadata["approvers"])!.AsArray();
+        approverConfiguration[0]!["approverEmail"] = "replacement-reviewer@example.com";
+        changedApprovalDefinition.Metadata["approvers"] = approverConfiguration.ToJsonString();
+        form.Versions.Add(new FormVersionRecord { VersionNumber = 2, DefinitionJson = serializer.Serialize(changedApprovalDefinition) });
+        await repo.SaveFormAsync(form);
+        users.Email = "final@example.com";
+        var incompatibleApprovalUpgrade = await app.UpgradeHandoffDraftAsync(form.Id, upgradeCandidate.Id, form.Versions[1].Id);
+        Check(incompatibleApprovalUpgrade.Draft is null && incompatibleApprovalUpgrade.IncompatibilityReason?.Contains("Approval routing changed", StringComparison.Ordinal) == true,
+            "Published approver changes cannot carry forward an earlier signed draft approval");
     }
 
     private static async Task TestDraftUpgradeAsync(FormsApplicationService app, FakeRepository repo, MutableUserContext users, IFormDefinitionSerializer serializer)

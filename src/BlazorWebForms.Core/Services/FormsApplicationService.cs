@@ -744,6 +744,9 @@ public sealed class FormsApplicationService(
 
         ValidateDurationAnswers(definition, normalizedAnswers);
 
+        var answersChanged = draft is not null &&
+            (!AnswerSetsEqual(draft.Answers, normalizedAnswers) || SubmittedFilesChanged(draft.Files, request.Files, request.Answers));
+        var previousApprovalSteps = draft?.ApprovalSteps.ToList() ?? [];
         var entry = draft ?? new EntryRecord
         {
             FormId = form.Id,
@@ -764,7 +767,21 @@ public sealed class FormsApplicationService(
         // ── Formula / calculated fields ──────────────────────────────────────
         ApplyFormulaFields(definition, entry.Answers);
 
-        entry.Status = request.Approvers.Count > 0 ? EntryStatus.NeedsApproval : EntryStatus.Submitted;
+        var approvalSteps = BuildApprovalSteps(request, definition, entry.Answers);
+        var preSubmissionSteps = approvalSteps.Where(step => step.IsPreSubmission).ToList();
+        PreserveApprovalDecisions(preSubmissionSteps, previousApprovalSteps, answersChanged);
+        if (preSubmissionSteps.Any(step => step.Status != ApprovalStepStatus.Approved))
+        {
+            entry.ApprovalSteps = preSubmissionSteps;
+            entry.Status = EntryStatus.NeedsApproval;
+        }
+        else
+        {
+            entry.ApprovalSteps = preSubmissionSteps.Concat(approvalSteps.Where(step => !step.IsPreSubmission)).ToList();
+            entry.Status = entry.ApprovalSteps.Any(step => !step.IsPreSubmission)
+                ? EntryStatus.NeedsApproval
+                : EntryStatus.Submitted;
+        }
         var revisionNumber = entry.Revisions.Count + 1;
 
         entry.SearchIndex = SearchIndexBuilder.Build(definition, entry.Answers);
@@ -780,13 +797,28 @@ public sealed class FormsApplicationService(
         });
 
         // ── Approval steps — with calculated routing ─────────────────────────
-        entry.ApprovalSteps = BuildApprovalSteps(request, definition, entry.Answers);
 
         // ── Quiz / scoring ───────────────────────────────────────────────────
         if (definition.IsQuizMode)
         {
             entry.Score = ComputeQuizScore(definition, entry.Answers);
             entry.QuizPassed = definition.PassScore.HasValue ? entry.Score >= definition.PassScore.Value : null;
+        }
+
+        if (entry.Status == EntryStatus.NeedsApproval && entry.ApprovalSteps.All(step => step.IsPreSubmission))
+        {
+            if (templatedEnabled && draft is not null) await SaveWorkflowDraftAsync(entry, expectedToken, cancellationToken);
+            else await repository.SaveEntryAsync(entry, cancellationToken);
+            metadataCache.InvalidateForms();
+            await NotifyPendingApproverAssignmentsAsync(form, entry, cancellationToken);
+            return new FormSubmissionResult
+            {
+                Entry = entry,
+                Score = entry.Score,
+                QuizPassed = entry.QuizPassed,
+                ConfirmationMessage = form.Publication.ConfirmationMessage,
+                ConfirmationRedirectUrl = form.Publication.ConfirmationRedirectUrl
+            };
         }
 
         if (templatedEnabled && draft is not null) await SaveWorkflowDraftAsync(entry, expectedToken, cancellationToken);
@@ -889,6 +921,9 @@ public sealed class FormsApplicationService(
             StripReservedMetadata(normalizedAnswers);
         }
 
+        var answersChanged = !isNewEntry &&
+            (!AnswerSetsEqual(entry.Answers, normalizedAnswers) || SubmittedFilesChanged(entry.Files, request.Files, request.Answers));
+        var previousApprovalSteps = entry.ApprovalSteps.ToList();
         entry.FormVersionId = version.Id;
         entry.SubmittedBy = user.DisplayName;
         entry.SubmittedByEmail = user.Email;
@@ -904,16 +939,11 @@ public sealed class FormsApplicationService(
         if (templatedEnabled) ApplyFormulaFields(definition, entry.Answers);
         entry.SearchIndex = SearchIndexBuilder.Build(definition, entry.Answers);
 
-        entry.ApprovalSteps = request.Approvers
-            .Where(a => !string.IsNullOrWhiteSpace(a.Email))
-            .Select((approver, index) => new ApprovalStepRecord
-            {
-                Order = index + 1,
-                ApproverId = approver.Id,
-                ApproverName = !string.IsNullOrEmpty(approver.DisplayName) ? approver.DisplayName : approver.Name,
-                ApproverEmail = approver.Email
-            })
+        var draftApprovalSteps = BuildApprovalSteps(new SubmitEntryRequest { Approvers = request.Approvers }, definition, entry.Answers)
+            .Where(step => step.IsPreSubmission)
             .ToList();
+        PreserveApprovalDecisions(draftApprovalSteps, previousApprovalSteps, answersChanged);
+        entry.ApprovalSteps = draftApprovalSteps;
 
         entry.Revisions.Add(new EntryRevisionRecord
         {
@@ -1183,7 +1213,13 @@ public sealed class FormsApplicationService(
         var step = guard.Step;
         var form = guard.Form;
         var user = guard.User;
+        var version = form.Versions.FirstOrDefault(candidate => candidate.Id == entry.FormVersionId);
+        var definition = version is null ? null : serializer.Deserialize(version.DefinitionJson);
+        if ((step.RequireSignature || (definition is not null && IsApproverSignatureRequired(definition, step.ApproverId))) &&
+            string.IsNullOrWhiteSpace(signature))
+            throw new InvalidOperationException("A signature is required for this approval step.");
 
+        var expectedToken = entry.ConcurrencyToken?.ToArray();
         step.Status = ApprovalStepStatus.Approved;
         step.Signature = signature;
         step.RejectionReason = null;
@@ -1200,10 +1236,15 @@ public sealed class FormsApplicationService(
 
         if (entry.ApprovalSteps.All(candidate => candidate.Status == ApprovalStepStatus.Approved))
         {
-            entry.Status = EntryStatus.Approved;
+            entry.Status = entry.ApprovalSteps.Count > 0 && entry.ApprovalSteps.All(candidate => candidate.IsPreSubmission)
+                ? EntryStatus.Draft
+                : EntryStatus.Approved;
         }
 
-        await repository.SaveEntryAsync(entry, cancellationToken);
+        if (expectedToken is { Length: > 0 })
+            await repository.SaveDraftEntryIfUnchangedAsync(entry, expectedToken, cancellationToken);
+        else
+            await repository.SaveEntryAsync(entry, cancellationToken);
         metadataCache.InvalidateForms();
         await webhookDispatcher.DispatchAsync(form, WebhookTriggerEvent.StepApproved, entry, cancellationToken);
 
@@ -1211,6 +1252,11 @@ public sealed class FormsApplicationService(
         {
             await webhookDispatcher.DispatchAsync(form, WebhookTriggerEvent.EntryApproved, entry, cancellationToken);
             await emailNotifier.NotifyEntryApprovedAsync(form, entry, cancellationToken);
+        }
+        else if (entry.Status == EntryStatus.Draft)
+        {
+            try { await emailNotifier.NotifyDraftHandedOffWithResultAsync(form, entry, entry.SubmittedByEmail, cancellationToken); }
+            catch (Exception ex) { logger.LogError(ex, "Approved draft {EntryId} could not be returned to its submitter by email.", entry.Id); }
         }
 
         return entry;
@@ -1230,6 +1276,9 @@ public sealed class FormsApplicationService(
         var step = guard.Step;
         var form = guard.Form;
         var user = guard.User;
+        var expectedToken = entry.ConcurrencyToken?.ToArray();
+        if (step.IsPreSubmission)
+            throw new InvalidOperationException("Draft approvals must be returned to a selected handoff participant.");
 
         step.Status = ApprovalStepStatus.Rejected;
         step.RejectionReason = reason.Trim();
@@ -1246,11 +1295,77 @@ public sealed class FormsApplicationService(
             OccurredUtc = DateTimeOffset.UtcNow
         });
 
-        await repository.SaveEntryAsync(entry, cancellationToken);
+        if (expectedToken is { Length: > 0 })
+            await repository.SaveDraftEntryIfUnchangedAsync(entry, expectedToken, cancellationToken);
+        else
+            await repository.SaveEntryAsync(entry, cancellationToken);
         metadataCache.InvalidateForms();
         await webhookDispatcher.DispatchAsync(form, WebhookTriggerEvent.StepRejected, entry, cancellationToken);
         await webhookDispatcher.DispatchAsync(form, WebhookTriggerEvent.EntryRejected, entry, cancellationToken);
         await emailNotifier.NotifyEntryRejectedAsync(form, entry, step, cancellationToken);
+        return entry;
+    }
+
+    public async Task<EntryRecord> RejectDraftApprovalAsync(Guid entryId, Guid stepId, RejectDraftApprovalRequest request, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.Reason)) throw new InvalidOperationException("Rejection reason is required.");
+        var entry = await repository.GetEntryAsync(entryId, cancellationToken) ?? throw new InvalidOperationException("Entry not found.");
+        var guard = await ApprovalStepGuard.ValidateAsync(entry, stepId, repository, currentUserContext, permissionEvaluator, cancellationToken);
+        var step = guard.Step;
+        if (!step.IsPreSubmission) throw new InvalidOperationException("Only pre-submission approvals can return a draft.");
+        var user = guard.User;
+        var form = guard.Form;
+        var version = form.Versions.FirstOrDefault(candidate => candidate.Id == entry.FormVersionId)
+                      ?? throw new InvalidOperationException("Form version not found for entry.");
+        var definition = serializer.Deserialize(version.DefinitionJson);
+        EnsureWorkflowIdentity(user);
+        var recipientEmail = (request.RecipientEmail ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(recipientEmail) || !recipientEmail.Contains('@'))
+            throw new InvalidOperationException("A valid return recipient email is required.");
+        recipientEmail = recipientEmail.ToLowerInvariant();
+        if (string.Equals(recipientEmail, user.Email, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("The return recipient must be different from the acting approver.");
+        var templatedEnabled = IsTemplatedFormEnabled(definition);
+        var steps = templatedEnabled ? GetHandoffSteps(definition) : [];
+        if (steps.Count > 0 && !steps.Contains(request.TargetStageId, StringComparer.Ordinal))
+            throw new InvalidOperationException("The selected return stage is not configured for this form.");
+        var expectedToken = entry.ConcurrencyToken?.ToArray();
+        step.Status = ApprovalStepStatus.Rejected;
+        step.RejectionReason = request.Reason.Trim();
+        step.Signature = null;
+        step.CompletedUtc = DateTimeOffset.UtcNow;
+        entry.ApprovalAuditTrail.Add(new ApprovalAuditEvent
+        {
+            Action = ApprovalAuditAction.StepRejected,
+            ApprovalStepId = step.Id,
+            ActorUserId = user.UserId,
+            ActorDisplayName = user.DisplayName,
+            Reason = step.RejectionReason,
+            OccurredUtc = DateTimeOffset.UtcNow
+        });
+        if (templatedEnabled)
+        {
+            entry.Answers[TemplatedRecipientEmailKey] = recipientEmail;
+            entry.Answers["__templated.recipientName"] = string.IsNullOrWhiteSpace(request.RecipientDisplayName) ? recipientEmail : request.RecipientDisplayName.Trim();
+            entry.Answers["__templated.handoffUtc"] = DateTimeOffset.UtcNow.ToString("O");
+            if (steps.Count > 0) entry.Answers[HandoffStepIdKey] = request.TargetStageId;
+        }
+        entry.SubmittedByEmail = recipientEmail;
+        entry.SubmittedBy = string.IsNullOrWhiteSpace(request.RecipientDisplayName) ? recipientEmail : request.RecipientDisplayName.Trim();
+        entry.SubmittedUtc = DateTimeOffset.UtcNow;
+        entry.Status = EntryStatus.Draft;
+        entry.Revisions.Add(new EntryRevisionRecord
+        {
+            RevisionNumber = entry.Revisions.Count + 1,
+            EditedBy = user.DisplayName,
+            EditedUtc = entry.SubmittedUtc,
+            Answers = new Dictionary<string, string?>(entry.Answers, StringComparer.OrdinalIgnoreCase)
+        });
+        if (expectedToken is not { Length: > 0 }) throw new InvalidOperationException("The draft has no concurrency token. Reload and retry.");
+        await repository.SaveDraftEntryIfUnchangedAsync(entry, expectedToken, cancellationToken);
+        metadataCache.InvalidateForms();
+        try { await emailNotifier.NotifyDraftHandedOffWithResultAsync(form, entry, recipientEmail, cancellationToken); }
+        catch (Exception ex) { logger.LogError(ex, "Rejected draft {EntryId} was returned but its notification could not be delivered.", entry.Id); }
         return entry;
     }
 
@@ -1284,22 +1399,16 @@ public sealed class FormsApplicationService(
         }
         else StripReservedMetadata(request.Answers);
 
+        ApplyFormulaFields(definition, request.Answers);
         ValidateDurationAnswers(definition, request.Answers);
         entry.Answers = new Dictionary<string, string?>(request.Answers, StringComparer.OrdinalIgnoreCase);
         entry.SearchIndex = SearchIndexBuilder.Build(definition, entry.Answers);
 
-        entry.ApprovalSteps = request.Approvers
-            .Where(a => !string.IsNullOrWhiteSpace(a.Email))
-            .Select((approver, index) => new ApprovalStepRecord
-            {
-                Order = index + 1,
-                ApproverId = approver.Id,
-                ApproverName = !string.IsNullOrEmpty(approver.DisplayName) ? approver.DisplayName : approver.Name,
-                ApproverEmail = approver.Email,
-                Status = ApprovalStepStatus.Pending
-            })
-            .ToList();
-
+        var approvalSteps = BuildApprovalSteps(new SubmitEntryRequest { Approvers = request.Approvers }, definition, entry.Answers);
+        var preSubmissionSteps = approvalSteps.Where(step => step.IsPreSubmission).ToList();
+        entry.ApprovalSteps = preSubmissionSteps.Count > 0
+            ? preSubmissionSteps
+            : approvalSteps;
         entry.Status = entry.ApprovalSteps.Count > 0 ? EntryStatus.NeedsApproval : EntryStatus.Submitted;
         entry.Revisions.Add(new EntryRevisionRecord
         {
@@ -2615,6 +2724,9 @@ public sealed class FormsApplicationService(
             var newSteps = GetHandoffSteps(current);
             if (!oldSteps.SequenceEqual(newSteps, StringComparer.Ordinal))
                 return "The handoff stages have changed.";
+            if (draft.ApprovalSteps.Any(step => step.Status == ApprovalStepStatus.Approved) &&
+                !string.Equals(GetApprovalConfigurationFingerprint(previous), GetApprovalConfigurationFingerprint(current), StringComparison.Ordinal))
+                return "Approval routing changed after a draft approval.";
             var actor = oldSteps.Count > 0
                 ? ResolveHandoffStep(oldSteps, draft.Answers)
                 : ResolveTemplatedActorRole(user, draft.Answers, draft.Answers);
@@ -2650,6 +2762,21 @@ public sealed class FormsApplicationService(
         {
             return "The updated form has an invalid handoff configuration or requires answers from an earlier participant.";
         }
+    }
+
+    private static string GetApprovalConfigurationFingerprint(FormDefinition definition)
+    {
+        var approvers = definition.Metadata.GetValueOrDefault("approvers") ?? string.Empty;
+        var conditions = string.Empty;
+        if (definition.Metadata.TryGetValue(FormSettingsMetadataKey, out var settingsJson) && !string.IsNullOrWhiteSpace(settingsJson))
+        {
+            using var settings = JsonDocument.Parse(settingsJson);
+            if ((settings.RootElement.TryGetProperty("approverConditionsJson", out var configuredConditions) ||
+                 settings.RootElement.TryGetProperty("ApproverConditionsJson", out configuredConditions)) &&
+                configuredConditions.ValueKind == JsonValueKind.Object)
+                conditions = configuredConditions.GetRawText();
+        }
+        return $"{approvers}\n{conditions}";
     }
 
     private Dictionary<string, string?> PrepareWorkflowRevision(FormDefinition definition, EntryRecord entry, UserProfile user, IReadOnlyDictionary<string, string?> incoming)
@@ -2870,6 +2997,117 @@ public sealed class FormsApplicationService(
 
     // ── Approval step builder (with calculated routing) ──────────────────────
 
+    private static bool AnswerSetsEqual(IReadOnlyDictionary<string, string?> first, IReadOnlyDictionary<string, string?> second) =>
+        first.Count == second.Count && first.All(item => second.TryGetValue(item.Key, out var value) && string.Equals(item.Value, value, StringComparison.Ordinal));
+
+    private static bool SubmittedFilesChanged(IReadOnlyList<EntryFileRecord>? current, IReadOnlyList<SubmittedFileInput> incoming, IReadOnlyDictionary<string, string?> incomingAnswers)
+    {
+        var files = current ?? [];
+        foreach (var upload in incoming)
+        {
+            var existing = files.FirstOrDefault(file => string.Equals(file.FieldId, upload.FieldId, StringComparison.OrdinalIgnoreCase));
+            if (existing is null || !string.Equals(existing.Sha256, upload.File.Sha256, StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return incomingAnswers.Any(answer => string.IsNullOrWhiteSpace(answer.Value) &&
+            files.Any(file => string.Equals(file.FieldId, answer.Key, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private static void PreserveApprovalDecisions(List<ApprovalStepRecord> configured, IReadOnlyList<ApprovalStepRecord> previous, bool answersChanged)
+    {
+        foreach (var step in configured)
+        {
+            var prior = previous.FirstOrDefault(candidate => candidate.IsPreSubmission == step.IsPreSubmission &&
+                string.Equals(candidate.ApproverId, step.ApproverId, StringComparison.Ordinal));
+            if (prior is null) continue;
+            if (!answersChanged && prior.Status == ApprovalStepStatus.Approved)
+            {
+                step.Id = prior.Id;
+                step.Status = prior.Status;
+                step.Signature = prior.Signature;
+                step.CompletedUtc = prior.CompletedUtc;
+            }
+            else
+            {
+                step.Status = ApprovalStepStatus.Pending;
+                step.Signature = null;
+                step.RejectionReason = null;
+                step.CompletedUtc = null;
+            }
+        }
+    }
+
+    private List<ApproverInput> ResolveConfiguredApprovers(FormDefinition definition, IReadOnlyDictionary<string, string?> answers, IReadOnlyList<ApproverInput> requested)
+    {
+        if (!definition.Metadata.TryGetValue("approvers", out var configuredJson) || string.IsNullOrWhiteSpace(configuredJson))
+            return requested.Where(approver => !string.IsNullOrWhiteSpace(approver.Email)).ToList();
+
+        var requestedById = requested.GroupBy(approver => approver.Id, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Last(), StringComparer.OrdinalIgnoreCase);
+        using var configuredDocument = JsonDocument.Parse(configuredJson);
+        if (configuredDocument.RootElement.ValueKind != JsonValueKind.Array)
+            throw new InvalidOperationException("Invalid approver configuration.");
+        var conditions = ReadApproverConditions(definition);
+        var result = new List<ApproverInput>();
+        foreach (var item in configuredDocument.RootElement.EnumerateArray())
+        {
+            if (item.ValueKind != JsonValueKind.Object) throw new InvalidOperationException("Invalid approver configuration.");
+            var id = ReadJsonString(item, "id");
+            if (string.IsNullOrWhiteSpace(id)) throw new InvalidOperationException("Invalid approver configuration.");
+            if (conditions.TryGetValue(id, out var condition) && !conditionEvaluator.IsVisible(condition, answers)) continue;
+            requestedById.TryGetValue(id, out var supplied);
+            var name = ReadJsonString(item, "label") ?? supplied?.Name ?? id;
+            var displayName = ReadJsonString(item, "approverDisplayName") ?? supplied?.DisplayName ?? name;
+            var configuredEmail = ReadJsonString(item, "approverEmail");
+            var email = !string.IsNullOrWhiteSpace(configuredEmail)
+                ? configuredEmail
+                : !string.IsNullOrWhiteSpace(ReadJsonString(item, "employeeId")) ? string.Empty : supplied?.Email ?? string.Empty;
+            if (string.IsNullOrWhiteSpace(email)) continue;
+            var timing = ReadJsonString(item, "approvalTiming");
+            result.Add(new ApproverInput
+            {
+                Id = id,
+                Name = name,
+                DisplayName = displayName,
+                Email = email.Trim(),
+                IsPreSubmission = string.Equals(timing, "BeforeSubmission", StringComparison.OrdinalIgnoreCase) ||
+                    string.Equals(timing, "Before", StringComparison.OrdinalIgnoreCase),
+                RequireSignature = ReadJsonBoolean(item, "requireSignature")
+            });
+        }
+        return result;
+    }
+
+    private static Dictionary<string, VisibilityConditionDefinition> ReadApproverConditions(FormDefinition definition)
+    {
+        var result = new Dictionary<string, VisibilityConditionDefinition>(StringComparer.OrdinalIgnoreCase);
+        if (!definition.Metadata.TryGetValue(FormSettingsMetadataKey, out var settingsJson) || string.IsNullOrWhiteSpace(settingsJson)) return result;
+        using var settingsDocument = JsonDocument.Parse(settingsJson);
+        if (!settingsDocument.RootElement.TryGetProperty("approverConditionsJson", out var conditions) &&
+            !settingsDocument.RootElement.TryGetProperty("ApproverConditionsJson", out conditions)) return result;
+        if (conditions.ValueKind != JsonValueKind.Object) throw new InvalidOperationException("Invalid approver routing configuration.");
+        foreach (var condition in conditions.EnumerateObject())
+        {
+            if (condition.Value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(condition.Value.GetString())) continue;
+            var parsed = JsonSerializer.Deserialize<VisibilityConditionDefinition>(condition.Value.GetString()!, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (parsed is not null && parsed.Rules.Count > 0) result[condition.Name] = parsed;
+        }
+        return result;
+    }
+
+    private static string? ReadJsonString(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+
+    private static bool ReadJsonBoolean(JsonElement element, string property) =>
+        element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.True;
+
+    private static bool IsApproverSignatureRequired(FormDefinition definition, string approverId)
+    {
+        if (!definition.Metadata.TryGetValue("approvers", out var json) || string.IsNullOrWhiteSpace(json)) return false;
+        using var document = JsonDocument.Parse(json);
+        return document.RootElement.ValueKind == JsonValueKind.Array && document.RootElement.EnumerateArray().Any(item =>
+            string.Equals(ReadJsonString(item, "id"), approverId, StringComparison.OrdinalIgnoreCase) && ReadJsonBoolean(item, "requireSignature"));
+    }
+
     private List<ApprovalStepRecord> BuildApprovalSteps(
         SubmitEntryRequest request,
         FormDefinition definition,
@@ -2877,8 +3115,9 @@ public sealed class FormsApplicationService(
     {
         // If the form definition has a workflow, resolve calculated expressions first
         var workflowSteps = definition.ApprovalWorkflow?.Steps ?? [];
+        var approvers = ResolveConfiguredApprovers(definition, answers, request.Approvers);
 
-        var steps = request.Approvers
+        var steps = approvers
             .Select((approver, index) =>
             {
                 var workflowStep = index < workflowSteps.Count ? workflowSteps[index] : null;
@@ -2907,6 +3146,8 @@ public sealed class FormsApplicationService(
                     ApproverName = resolvedName,
                     ApproverEmail = resolvedEmail,
                     Instructions = workflowStep?.Instructions ?? string.Empty,
+                    IsPreSubmission = approver.IsPreSubmission,
+                    RequireSignature = approver.RequireSignature,
                     AcceptorMode = request.StepAcceptors.ContainsKey(index)
                         ? ApprovalStepAcceptorMode.AnyOf
                         : ApprovalStepAcceptorMode.Single,

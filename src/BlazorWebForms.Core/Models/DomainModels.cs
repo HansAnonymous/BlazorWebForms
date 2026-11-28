@@ -197,6 +197,8 @@ public sealed class ApprovalStepRecord
     public List<ApprovalAcceptor> Acceptors { get; set; } = [];
     /// <summary>Optional instructions shown to the approver(s) for this step.</summary>
     public string Instructions { get; set; } = string.Empty;
+    public bool IsPreSubmission { get; set; }
+    public bool RequireSignature { get; set; }
     public ApprovalStepStatus Status { get; set; } = ApprovalStepStatus.Pending;
     public string? Signature { get; set; }
     public string? RejectionReason { get; set; }

@@ -72,6 +72,12 @@ namespace BlazorWebForms.Infrastructure.SqlServer.Migrations
                         .HasMaxLength(4000)
                         .HasColumnType("nvarchar(4000)");
 
+                    b.Property<bool>("IsPreSubmission")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("RequireSignature")
+                        .HasColumnType("bit");
+
                     b.Property<string>("DelegatedToEmail")
                         .HasMaxLength(256)
                         .HasColumnType("nvarchar(256)");

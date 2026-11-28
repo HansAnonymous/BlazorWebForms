@@ -2,10 +2,19 @@ using BlazorWebForms.Core.Abstractions;
 using BlazorWebForms.Core.Models;
 using BlazorWebForms.Core.Services;
 using BlazorWebForms.Infrastructure.SqlServer;
+using Microsoft.Data.SqlClient;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
 RunOptionsValidationGuards();
+
+if (args.Contains("--startup-legacy"))
+{
+    await TestLegacyStartupAsync();
+    await TestUnavailableDatabaseAsync();
+    return;
+}
 
 var services = new ServiceCollection();
 services.AddBlazorWebFormsCore();
@@ -30,6 +39,7 @@ var storage = provider.GetRequiredService<IFileStorage>();
 var forms = provider.GetRequiredService<FormsApplicationService>();
 var telemetry = provider.GetRequiredService<IOperationalTelemetry>() as InMemoryOperationalTelemetry;
 
+Assert(await provider.GetRequiredService<BlazorWebFormsDbContext>().Database.EnsureCreatedAsync(), "Test database was newly provisioned.");
 await repository.SeedAsync();
 
 var dashboard = await forms.GetDashboardAsync();
@@ -464,6 +474,73 @@ static async Task AssertThrowsAsync(Func<Task> action, string message)
     }
 
     throw new InvalidOperationException(message);
+}
+
+static async Task TestLegacyStartupAsync()
+{
+    var services = new ServiceCollection();
+    services.AddBlazorWebFormsCore();
+    services.AddBlazorWebFormsSqlServer(options =>
+    {
+        options.ConnectionString = $"Server=(localdb)\\MSSQLLocalDB;Database=BlazorWebFormsStartupTest_{Guid.NewGuid():N};Trusted_Connection=True;";
+    });
+    await using var provider = services.BuildServiceProvider();
+    var db = provider.GetRequiredService<BlazorWebFormsDbContext>();
+    var created = false;
+    try
+    {
+        created = await db.Database.EnsureCreatedAsync();
+        Assert(created, "The isolated startup fixture must create a new database.");
+        await db.Database.ExecuteSqlRawAsync("ALTER TABLE [ApprovalSteps] DROP COLUMN [IsPreSubmission], [RequireSignature]");
+        var repository = provider.GetRequiredService<IFormsRepository>();
+        await repository.SeedAsync();
+        await repository.SeedAsync();
+        var flags = await db.Database.SqlQueryRaw<int>("""
+            SELECT CAST(CASE WHEN COL_LENGTH(N'ApprovalSteps', N'IsPreSubmission') IS NOT NULL
+                              AND COL_LENGTH(N'ApprovalSteps', N'RequireSignature') IS NOT NULL
+                             THEN 1 ELSE 0 END AS int) AS [Value]
+            """).SingleAsync();
+        Assert(flags == 1, "Legacy startup adds both approval flags and is repeatable.");
+        Assert(!(await db.Database.GetAppliedMigrationsAsync()).Any(), "Legacy startup does not invent migration history.");
+        Assert(await db.Forms.AnyAsync(), "Legacy startup seeds successfully.");
+        Console.WriteLine("Legacy startup regression passed.");
+    }
+    finally
+    {
+        if (created) await db.Database.EnsureDeletedAsync();
+    }
+}
+
+static async Task TestUnavailableDatabaseAsync()
+{
+    var databaseName = $"BlazorWebFormsMissingTest_{Guid.NewGuid():N}";
+    var services = new ServiceCollection();
+    services.AddBlazorWebFormsCore();
+    services.AddBlazorWebFormsSqlServer(options =>
+    {
+        options.ConnectionString = $"Server=(localdb)\\MSSQLLocalDB;Database={databaseName};Trusted_Connection=True;";
+    });
+    services.AddDbContext<BlazorWebFormsDbContext>(options => options.UseSqlServer(
+        $"Server=(localdb)\\MSSQLLocalDB;Database={databaseName};Trusted_Connection=True;",
+        sql => sql.ExecutionStrategy(deps => new Microsoft.EntityFrameworkCore.Storage.NonRetryingExecutionStrategy(deps))));
+    await using var provider = services.BuildServiceProvider();
+    try
+    {
+        await provider.GetRequiredService<IFormsRepository>().SeedAsync();
+        throw new InvalidOperationException("Startup must not create an unavailable database.");
+    }
+    catch (SqlException ex) when (ex.Number == 4060)
+    {
+        // The original connection error must reach the caller.
+    }
+
+    await using var connection = new SqlConnection("Server=(localdb)\\MSSQLLocalDB;Database=master;Trusted_Connection=True;");
+    await connection.OpenAsync();
+    await using var command = connection.CreateCommand();
+    command.CommandText = "SELECT DB_ID(@name)";
+    command.Parameters.AddWithValue("@name", databaseName);
+    Assert(await command.ExecuteScalarAsync() == DBNull.Value, "Failed startup did not create the missing database.");
+    Console.WriteLine("Unavailable database startup regression passed.");
 }
 
 static void RunOptionsValidationGuards()

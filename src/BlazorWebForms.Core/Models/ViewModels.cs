@@ -88,6 +88,14 @@ public sealed class SaveDraftSubmissionRequest
     public List<SubmittedFileInput> Files { get; set; } = [];
 }
 
+public sealed class RejectDraftApprovalRequest
+{
+    public string Reason { get; set; } = string.Empty;
+    public string TargetStageId { get; set; } = string.Empty;
+    public string RecipientEmail { get; set; } = string.Empty;
+    public string RecipientDisplayName { get; set; } = string.Empty;
+}
+
 public sealed class TransferDraftSubmissionRequest
 {
     public Guid DraftEntryId { get; set; }
@@ -166,6 +174,8 @@ public sealed class ApproverInput
     public string Name { get; set; } = string.Empty;
     public string DisplayName { get; set; } = string.Empty;
     public string Email { get; set; } = string.Empty;
+    public bool IsPreSubmission { get; set; }
+    public bool RequireSignature { get; set;}
 }
 
 public sealed class ResubmitEntryRequest

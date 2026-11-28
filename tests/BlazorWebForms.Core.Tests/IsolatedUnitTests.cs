@@ -1420,7 +1420,7 @@ internal sealed class TestFakeRepository : IFormsRepository
         }
         lock (entryLock)
         {
-            if (!entries.TryGetValue(entry.Id, out var current) || current.Status != EntryStatus.Draft || current.ConcurrencyToken is null || !current.ConcurrencyToken.SequenceEqual(expectedToken))
+            if (!entries.TryGetValue(entry.Id, out var current) || current.Status is not (EntryStatus.Draft or EntryStatus.NeedsApproval) || current.ConcurrencyToken is null || !current.ConcurrencyToken.SequenceEqual(expectedToken))
                 throw new InvalidOperationException("The draft was changed by another request. Reload and retry.");
             entry.ConcurrencyToken = BitConverter.GetBytes(++nextToken);
             entries[entry.Id] = Copy(entry);
